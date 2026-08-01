@@ -77,8 +77,156 @@ services:
       twaky-pg: { condition: service_healthy }
     command: ["sleep", "infinity"]
 
+  # ─────────────────────────────────────────────────────────────────
+  # Langfuse observability stack (self-hosted, MIT).
+  # UI exposed via Traefik at langfuse.${BASE_DOMAIN}. No host ports.
+  # ─────────────────────────────────────────────────────────────────
+  twaky-clickhouse:
+    image: clickhouse/clickhouse-server:26.5-alpine
+    container_name: twaky-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - twaky_clickhouse_data:/var/lib/clickhouse
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [twake-network]
+
+  twaky-redis:
+    image: redis:7-alpine
+    container_name: twaky-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_AUTH}", "--appendonly", "yes"]
+    volumes:
+      - twaky_redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_AUTH ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_AUTH: ${REDIS_AUTH}
+    networks: [twake-network]
+
+  twaky-seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: twaky-seaweedfs
+    restart: unless-stopped
+    command: ["server", "-s3", "-master.volumeSizeLimitMB=1024", "-dir=/data"]
+    volumes:
+      - twaky_seaweedfs_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8333/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks: [twake-network]
+
+  # One-shot init: create the `langfuse` bucket on seaweedfs.
+  # weed shell is the canonical way (S3 PUT /bucket returns 409 on this
+  # SeaweedFS build). Uses the same seaweedfs image (already pulled).
+  twaky-seaweedfs-init:
+    image: chrislusf/seaweedfs:latest
+    container_name: twaky-seaweedfs-init
+    depends_on:
+      twaky-seaweedfs: { condition: service_healthy }
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - 'echo "s3.bucket.create -name langfuse" | weed shell -master=twaky-seaweedfs:9333'
+    networks: [twake-network]
+
+  twaky-langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: twaky-langfuse-web
+    restart: unless-stopped
+    depends_on:
+      twaky-pg: { condition: service_healthy }
+      twaky-clickhouse: { condition: service_healthy }
+      twaky-redis: { condition: service_healthy }
+      twaky-seaweedfs: { condition: service_healthy }
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://${LANGFUSE_PG_USER:-langfuse}:${LANGFUSE_PG_PASSWORD}@twaky-pg:5432/${LANGFUSE_PG_DB:-langfuse}
+      DIRECT_URL: postgresql://${LANGFUSE_PG_USER:-langfuse}:${LANGFUSE_PG_PASSWORD}@twaky-pg:5432/${LANGFUSE_PG_DB:-langfuse}
+      NEXTAUTH_URL: ${LANGFUSE_PUBLIC_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      SALT: ${SALT}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      AUTH_DISABLE_SIGNUP: "false"
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-twaky-org}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-Twaky}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-twaky-project}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-twaky}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD}
+      CLICKHOUSE_MIGRATION_URL: clickhouse://twaky-clickhouse:9000
+      CLICKHOUSE_URL: http://twaky-clickhouse:8123
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: twaky-redis
+      REDIS_PORT: "6379"
+      REDIS_AUTH: ${REDIS_AUTH}
+      LANGFUSE_S3_EVENT_UPLOAD_ENABLED: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://twaky-seaweedfs:8333
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_ENABLED: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://twaky-seaweedfs:8333
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+    healthcheck:
+      # Langfuse Next.js binds to the container's own IP, not 127.0.0.1.
+      test: ["CMD-SHELL", "wget -q --spider http://$$HOSTNAME:3000/api/public/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=twake-network
+      - traefik.http.routers.twaky-langfuse.rule=Host(`langfuse.${BASE_DOMAIN}`)
+      - traefik.http.routers.twaky-langfuse.entrypoints=websecure
+      - traefik.http.routers.twaky-langfuse.tls=true
+      - traefik.http.services.twaky-langfuse.loadbalancer.server.port=3000
+    networks: [twake-network]
+
+  twaky-langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: twaky-langfuse-worker
+    restart: unless-stopped
+    depends_on:
+      twaky-langfuse-web: { condition: service_healthy }
+    environment: *langfuse-env
+    networks: [twake-network]
+
 volumes:
   twaky_pg_data:
+  twaky_clickhouse_data:
+  twaky_redis_data:
+  twaky_seaweedfs_data:
 
 networks:
   twake-network:
