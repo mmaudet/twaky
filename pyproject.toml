@@ -1,0 +1,39 @@
+[project]
+name = "twaky"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Michel Maudet", email = "mmaudet@linagora.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aio-pika>=9.5",
+    "langchain-community>=0.3",
+    "langchain-core>=0.3",
+    "langchain-litellm>=0.2",
+    "langfuse>=3.0",
+    "langgraph>=0.6",
+    "litellm>=1.75",
+    "psycopg[binary,pool]>=3.2",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.7",
+    "python-dotenv>=1.0",
+    "structlog>=25.1",
+    "typer>=0.15",
+]
+
+[project.scripts]
+twaky = "twaky:main"
+
+[build-system]
+requires = ["uv_build>=0.11.16,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]

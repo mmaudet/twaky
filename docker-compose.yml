@@ -1,0 +1,85 @@
+# ─────────────────────────────────────────────────────────────────────
+# Twaky — graph agentic brick, self-contained compose.
+#
+# Runnable standalone (from /home/mmaudet/work/twaky):
+#   docker compose up -d
+#
+# Include-able from the platform deploy repo
+# (/home/mmaudet/deploy/kickstart-maudet-cloud/docker-compose.yaml):
+#   include:
+#     - ../../work/twaky/docker-compose.yml
+# ─────────────────────────────────────────────────────────────────────
+
+name: twaky
+
+x-python: &python-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: twaky:local
+  restart: unless-stopped
+  env_file: [.env]
+  networks: [twake-network]
+
+services:
+  # ─────────────────────────────────────────────────────────────────
+  # Dedicated Postgres+AGE. Serves BOTH the twaky graph (DB=twaky)
+  # and the Langfuse metadata (DB=langfuse, provisioned by initdb).
+  # No port published to host — reachable only over twake-network.
+  # ─────────────────────────────────────────────────────────────────
+  twaky-pg:
+    image: apache/age:release_PG16_1.6.0
+    container_name: twaky-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${TWAKY_PG_DB:-twaky}
+      POSTGRES_USER: ${TWAKY_PG_USER:-twaky}
+      POSTGRES_PASSWORD: ${TWAKY_PG_PASSWORD}
+      LANGFUSE_PG_USER: ${LANGFUSE_PG_USER:-langfuse}
+      LANGFUSE_PG_PASSWORD: ${LANGFUSE_PG_PASSWORD}
+      LANGFUSE_PG_DB: ${LANGFUSE_PG_DB:-langfuse}
+    volumes:
+      - twaky_pg_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TWAKY_PG_USER:-twaky} -d ${TWAKY_PG_DB:-twaky}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks: [twake-network]
+
+  # ─────────────────────────────────────────────────────────────────
+  # Python workers. All share the same image (Dockerfile above),
+  # differentiated by the `command:` used.
+  # ─────────────────────────────────────────────────────────────────
+  twaky-ingest:
+    <<: *python-common
+    container_name: twaky-ingest
+    depends_on:
+      twaky-pg: { condition: service_healthy }
+    command: ["twaky", "ingest"]
+
+  twaky-projector:
+    <<: *python-common
+    container_name: twaky-projector
+    depends_on:
+      twaky-pg: { condition: service_healthy }
+    command: ["twaky", "project"]
+
+  # Interactive: not started by `docker compose up`; use
+  #   docker compose run --rm twaky-agent twaky ask "..."
+  twaky-agent:
+    <<: *python-common
+    container_name: twaky-agent
+    profiles: ["ondemand"]
+    depends_on:
+      twaky-pg: { condition: service_healthy }
+    command: ["sleep", "infinity"]
+
+volumes:
+  twaky_pg_data:
+
+networks:
+  twake-network:
+    external: true
