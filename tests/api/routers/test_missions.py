@@ -147,6 +147,19 @@ class TestDetail:
             r = TestClient(app).get(f"/missions/{uuid4()}", cookies=_cookie())
         assert r.status_code == 404
 
+    def test_get_wrong_owner_returns_404(self, monkeypatch):
+        from twaky import config as _cfg
+
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+
+        # Mission belongs to bob@x, not alice@x
+        m = _fake_mission()
+        m.owner_email = "bob@x"
+        with patch("twaky.api.routers.missions.repository.get", return_value=m):
+            r = TestClient(app).get(f"/missions/{m.id}", cookies=_cookie())
+        assert r.status_code == 404
+
 
 class TestResume:
     def test_resume_happy(self, monkeypatch):
@@ -157,7 +170,7 @@ class TestResume:
 
         m = _fake_mission(state=MissionState.AWAITING_USER)
         with (
-            patch("twaky.api.routers.missions.engine.resume"),
+            patch("twaky.api.routers.missions.engine.resume") as mock_resume,
             patch("twaky.api.routers.missions.repository.get", return_value=m),
         ):
             r = TestClient(app).post(
@@ -166,6 +179,7 @@ class TestResume:
                 cookies=_cookie(),
             )
         assert r.status_code == 200
+        mock_resume.assert_called_once_with(m.id, user_response={"approved": True})
 
     def test_resume_wrong_state_returns_409(self, monkeypatch):
         from twaky import config as _cfg
@@ -203,6 +217,23 @@ class TestResume:
             )
         assert r.status_code == 404
 
+    def test_resume_wrong_owner_returns_404(self, monkeypatch):
+        from twaky import config as _cfg
+
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+
+        # Mission belongs to bob@x, not alice@x
+        m = _fake_mission(state=MissionState.AWAITING_USER)
+        m.owner_email = "bob@x"
+        with patch("twaky.api.routers.missions.repository.get", return_value=m):
+            r = TestClient(app).post(
+                f"/missions/{m.id}/resume",
+                json={"user_response": {"approved": True}},
+                cookies=_cookie(),
+            )
+        assert r.status_code == 404
+
 
 class TestCancel:
     def test_cancel_happy(self, monkeypatch):
@@ -213,7 +244,7 @@ class TestCancel:
 
         m = _fake_mission()
         with (
-            patch("twaky.api.routers.missions.engine.cancel"),
+            patch("twaky.api.routers.missions.engine.cancel") as mock_cancel,
             patch("twaky.api.routers.missions.repository.get", return_value=m),
         ):
             r = TestClient(app).post(
@@ -222,6 +253,7 @@ class TestCancel:
                 cookies=_cookie(),
             )
         assert r.status_code == 200
+        mock_cancel.assert_called_once_with(m.id, reason="user_requested")
 
     def test_cancel_terminal_returns_409(self, monkeypatch):
         from twaky import config as _cfg
@@ -244,3 +276,20 @@ class TestCancel:
                 cookies=_cookie(),
             )
         assert r.status_code == 409
+
+    def test_cancel_wrong_owner_returns_404(self, monkeypatch):
+        from twaky import config as _cfg
+
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+
+        # Mission belongs to bob@x, not alice@x
+        m = _fake_mission()
+        m.owner_email = "bob@x"
+        with patch("twaky.api.routers.missions.repository.get", return_value=m):
+            r = TestClient(app).post(
+                f"/missions/{m.id}/cancel",
+                json={"reason": "user_requested"},
+                cookies=_cookie(),
+            )
+        assert r.status_code == 404
