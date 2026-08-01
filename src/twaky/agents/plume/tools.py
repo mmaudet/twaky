@@ -23,7 +23,11 @@ def _make_llm() -> BaseChatModel:
 
 
 def _client() -> JmapClient:
-    return JmapClient(endpoint=settings.jmap_endpoint, token=bearer_token_for_owner())
+    return JmapClient(
+        endpoint=settings.jmap_endpoint,
+        token=bearer_token_for_owner(),
+        account_id=settings.jmap_account_id,
+    )
 
 
 def _from_addr(row: dict) -> str:

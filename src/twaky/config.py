@@ -82,6 +82,9 @@ class Settings(BaseSettings):
 
     # --- External services ---
     jmap_endpoint: str = Field(default="http://tmail-backend:8080/jmap")
+    # TBD spec §13: fetch accountId dynamically via JMAP session call once the
+    # tmail-backend session endpoint is confirmed.
+    jmap_account_id: str = Field(default="")
     searxng_endpoint: str = Field(default="http://searxng:8080")
 
     # --- Plume OIDC token exchange (Twake Visio ↔ Calendar pattern) ---

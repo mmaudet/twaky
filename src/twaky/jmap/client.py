@@ -11,6 +11,8 @@ _JMAP_MAIL = "urn:ietf:params:jmap:mail"
 
 
 class JmapClient:
+    # TBD spec §13: fetch accountId dynamically via JMAP session call once
+    # the tmail-backend session endpoint is confirmed.
     def __init__(self, endpoint: str, token: str, account_id: str | None = None):
         self.endpoint = endpoint
         self.token = token
