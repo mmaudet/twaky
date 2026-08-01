@@ -231,6 +231,44 @@ services:
     environment: *langfuse-env
     networks: [twake-network]
 
+  # ─────────────────────────────────────────────────────────────────
+  # Metabase — BI on top of ClickHouse (Langfuse observability data)
+  # + Postgres (twaky graph metadata). Own metadata DB on twaky-pg.
+  # ─────────────────────────────────────────────────────────────────
+  twaky-metabase:
+    image: metabase/metabase:v0.53.7
+    container_name: twaky-metabase
+    restart: unless-stopped
+    depends_on:
+      twaky-pg: { condition: service_healthy }
+      twaky-clickhouse: { condition: service_healthy }
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: twaky-pg
+      MB_DB_PORT: "5432"
+      MB_DB_DBNAME: ${METABASE_PG_DB:-metabase}
+      MB_DB_USER: ${METABASE_PG_USER:-metabase}
+      MB_DB_PASS: ${METABASE_PG_PASSWORD}
+      MB_SITE_URL: https://metabase.${BASE_DOMAIN}
+      MB_JETTY_HOST: 0.0.0.0
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_CHECK_FOR_UPDATES: "false"
+    healthcheck:
+      # Metabase binds 0.0.0.0:3000; /api/health returns {"status":"ok"} when ready.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=twake-network
+      - traefik.http.routers.twaky-metabase.rule=Host(`metabase.${BASE_DOMAIN}`)
+      - traefik.http.routers.twaky-metabase.entrypoints=websecure
+      - traefik.http.routers.twaky-metabase.tls=true
+      - traefik.http.services.twaky-metabase.loadbalancer.server.port=3000
+    networks: [twake-network]
+
 # Explicit `name:` on every volume so they resolve identically whether
 # twaky is launched standalone (`docker compose up` from this dir, project
 # "twaky") or via the deploy root include (project "kickstart-maudet-cloud").
