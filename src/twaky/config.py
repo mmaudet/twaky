@@ -92,6 +92,13 @@ class Settings(BaseSettings):
     plume_oidc_client_secret: str = Field(default="")
     plume_oidc_issuer: str = Field(default="")
 
+    # --- Sub-project 3a: API ---
+    api_base_url: str = Field(default="http://twaky-api:8000")
+    api_session_secret: str = Field(default="")
+    api_oidc_client_id: str = Field(default="")
+    api_oidc_client_secret: str = Field(default="")
+    api_oidc_issuer: str = Field(default="")
+
     @property
     def exchanges(self) -> list[str]:
         return [x.strip() for x in self.agent_exchanges.split(",") if x.strip()]
