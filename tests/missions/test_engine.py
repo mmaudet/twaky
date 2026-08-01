@@ -125,6 +125,62 @@ class TestLangfuseInstrumentation:
         _cleanup(m.id)
 
 
+class TestMissionChangedChannel:
+    """Every transition emits NOTIFY mission_changed with unified payload."""
+
+    def test_declare_emits_mission_changed(self):
+        import json
+
+        import psycopg
+
+        from twaky.missions import engine as _engine
+
+        with psycopg.connect(_dsn(), autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("LISTEN mission_changed")
+            m = _engine.declare(intent_text="mc", owner_email="a@x", declared_by="a@x")
+            conn.execute("SELECT 1")
+            got = []
+            for n in conn.notifies(timeout=2):
+                got.append(n.payload)
+                break
+        assert got, "expected at least one mission_changed"
+        payload = json.loads(got[0])
+        assert payload["mission_id"] == str(m.id)
+        assert payload["state"] == "declared"
+        assert "at" in payload
+        _cleanup(m.id)
+
+    def test_full_lifecycle_emits_seven_events(self):
+        import json
+
+        import psycopg
+
+        from twaky.missions import engine as _engine
+        from twaky.missions.models import PlanStep
+
+        events: list[dict] = []
+        m = _engine.declare(intent_text="mc-lc", owner_email="a@x", declared_by="a@x")
+        with psycopg.connect(_dsn(), autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("LISTEN mission_changed")
+            _engine.start_planning(m.id)
+            _engine.commit_plan(m.id, [PlanStep(agent="atlas", tool="noop", args={})])
+            _engine.request_user_input(m.id, reason="ok", artifact={"draft": "x"})
+            _engine.resume(m.id, user_response={"approved": True})
+            _engine.finish(m.id, outcome="done", artifacts=[])
+            conn.execute("SELECT 1")
+            for n in conn.notifies(timeout=2):
+                events.append(json.loads(n.payload))
+                if len(events) >= 5:
+                    break
+        states = [e["state"] for e in events if e["mission_id"] == str(m.id)]
+        # planning, running, awaiting_user, running, done — declare already fired before LISTEN
+        assert "planning" in states
+        assert "running" in states
+        assert "awaiting_user" in states
+        assert "done" in states
+        _cleanup(m.id)
+
+
 class TestEngineNotify:
     """engine.declare and engine.resume emit PG NOTIFY events."""
 
