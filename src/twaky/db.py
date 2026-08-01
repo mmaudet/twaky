@@ -43,3 +43,8 @@ def get_pool() -> ConnectionPool:
 def connection() -> Iterator[psycopg.Connection]:
     with get_pool().connection() as conn:
         yield conn
+
+
+def get_langgraph_dsn() -> str:
+    """DSN used by the langgraph PostgresSaver. Same DB as the twaky graph."""
+    return settings.pg_dsn

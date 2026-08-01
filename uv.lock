@@ -1110,6 +1110,21 @@ wheels = [
 ]
 
 [[package]]
+name = "langgraph-checkpoint-postgres"
+version = "3.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "langgraph-checkpoint" },
+    { name = "orjson" },
+    { name = "psycopg" },
+    { name = "psycopg-pool" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/06/92/1e8959f8cd1b56e672fde3227f6fd642be85af6c5fd662d73921074aa39d/langgraph_checkpoint_postgres-3.1.1.tar.gz", hash = "sha256:d320e147ddad8c374cd546df0b52b532dd54d0541dd9fd23fc738cbd5de76f41", size = 150413, upload-time = "2026-07-30T19:15:39.014Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/03/32/ba457698a48a0e18d786caa770033067049fbe36d6846f8e50f13b594b51/langgraph_checkpoint_postgres-3.1.1-py3-none-any.whl", hash = "sha256:6e353aecd8150de144fef8e51a49076f58b7d6830d4cf51392b7ad4d79832ba7", size = 50778, upload-time = "2026-07-30T19:15:37.405Z" },
+]
+
+[[package]]
 name = "langgraph-prebuilt"
 version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2639,6 +2654,7 @@ dependencies = [
     { name = "langchain-litellm" },
     { name = "langfuse" },
     { name = "langgraph" },
+    { name = "langgraph-checkpoint-postgres" },
     { name = "litellm" },
     { name = "psycopg", extra = ["binary", "pool"] },
     { name = "psycopg2-binary" },
@@ -2666,6 +2682,7 @@ requires-dist = [
     { name = "langchain-litellm", specifier = ">=0.2" },
     { name = "langfuse", specifier = ">=3,<4" },
     { name = "langgraph", specifier = ">=0.6" },
+    { name = "langgraph-checkpoint-postgres", specifier = ">=2.0" },
     { name = "litellm", specifier = ">=1.75" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
     { name = "psycopg2-binary", specifier = ">=2.9" },

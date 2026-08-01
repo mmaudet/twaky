@@ -98,13 +98,14 @@ declared ──▶ planning ──▶ running ──▶ awaiting_user ──▶ 
     │            │            │              │              │
     ▼            ▼            ▼              ▼              ▼
 cancelled    cancelled     done          cancelled        done
-                          failed          failed         failed
+failed       failed        failed         failed         failed
 ```
 
 Rules:
 
 - `done`, `failed`, `cancelled` are terminal — no outgoing transition.
 - Any non-terminal state can transition to `cancelled` (user or system abort).
+- `declared` and `planning` may also transition to `failed` — used by the recovery loop when a mission's LangGraph checkpoint is missing at boot (crash between `start_planning` and `commit_plan`).
 - `running ⇄ awaiting_user` may loop many times (multiple user checkpoints in one mission).
 - All other transitions are forbidden and raise `InvalidTransition` from the engine.
 

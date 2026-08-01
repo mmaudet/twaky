@@ -18,6 +18,10 @@ from twaky.mappers import (
     calendar_event_created,
     calendar_event_deleted,
     calendar_event_reply,
+    mail_message_expunged,
+    mail_message_flags_updated,
+    mail_message_moved,
+    mail_message_received,
     sabre_contact_created,
     sabre_contact_deleted,
 )
@@ -40,6 +44,11 @@ _REGISTRY: dict[str, Mapper] = {
     "sabre:contact:update": sabre_contact_created.map_event,
     # --- Contact removal: tombstone ---
     "sabre:contact:deleted": sabre_contact_deleted.map_event,
+    # --- Mail message lifecycle ---
+    "mail:message:received": mail_message_received.map_event,
+    "mail:message:expunged": mail_message_expunged.map_event,
+    "mail:message:flags:updated": mail_message_flags_updated.map_event,
+    "mail:message:moved": mail_message_moved.map_event,
 }
 
 

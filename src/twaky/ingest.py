@@ -24,6 +24,7 @@ from aio_pika import ExchangeType
 
 from twaky.config import settings
 from twaky.db import get_pool
+from twaky.owner_filter import matches_owner
 
 logging.basicConfig(level=logging.INFO)
 log = structlog.get_logger("twaky.ingest")
@@ -110,9 +111,13 @@ async def _consume(queue: aio_pika.abc.AbstractQueue) -> None:
         async for message in it:
             try:
                 exch = message.exchange or ""
+                payload = _decode_payload(message.body)
+                if not matches_owner(exch, payload, settings.twaky_owner_email):
+                    await message.ack()
+                    log.debug("dropped: not for owner", exchange=exch)
+                    continue
                 rk = message.routing_key or ""
                 mid = _message_key(exch, message.body, message.message_id)
-                payload = _decode_payload(message.body)
                 inserted = _insert_event(exch, rk, mid, payload)
                 await message.ack()
                 if inserted:

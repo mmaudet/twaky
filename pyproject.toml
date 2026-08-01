@@ -15,6 +15,7 @@ dependencies = [
     "langchain-litellm>=0.2",
     "langfuse>=3,<4",
     "langgraph>=0.6",
+    "langgraph-checkpoint-postgres>=2.0",
     "litellm>=1.75",
     "psycopg2-binary>=2.9",
     "psycopg[binary,pool]>=3.2",
@@ -31,6 +32,9 @@ twaky = "twaky:main"
 [build-system]
 requires = ["uv_build>=0.11.16,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.ruff.format]
+exclude = ["docs/superpowers/**/*.md"]
 
 [dependency-groups]
 dev = [
