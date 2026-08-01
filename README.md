@@ -48,6 +48,33 @@ Relationships:
 
 Extension is a matter of adding a mapper under `src/twaky/mappers/<exchange>.py` and a corresponding exchange to `AGENT_EXCHANGES` in the env.
 
+## Missions (Foundations)
+
+A twaky instance is scoped to a single owner (`TWAKY_OWNER_EMAIL` in `.env`).
+Every event that doesn't concern the owner is dropped at ingest — the
+`event_log` and graph stay owner-only.
+
+Missions are the unit of orchestration. A Mission is declared by natural
+language, planned by Atlas (sub-project 2), and traverses:
+
+    declared → planning → running ⇄ awaiting_user → done | failed | cancelled
+
+State lives in the `mission` Postgres table; the fine-grained per-mission
+execution state lives in the LangGraph checkpointer (`checkpoints` table,
+same DB). At Atlas boot, `recovery.resume_missions_after_restart()`
+reconciles: missions with no checkpoint are marked `failed` with reason
+`checkpoint_lost_after_restart`.
+
+Run the end-to-end scenario:
+
+    make scenarios-foundations
+
+Mail metadata is ingested from `mail:message:{received,expunged,flags:updated,moved}` —
+body fetching (JMAP) is deferred to sub-project 2.
+
+The `twaky:message:*` federation envelope is documented in
+`src/twaky/missions/envelope.py` but not wired — sub-project 4.
+
 ## Quickstart
 
 ```bash
