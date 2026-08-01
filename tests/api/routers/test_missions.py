@@ -122,3 +122,125 @@ class TestList:
 
         r = TestClient(app).get("/missions?state=BOGUS", cookies=_cookie())
         assert r.status_code == 422
+
+
+class TestDetail:
+    def test_get_returns_mission(self, monkeypatch):
+        from twaky import config as _cfg
+
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+
+        m = _fake_mission()
+        with patch("twaky.api.routers.missions.repository.get", return_value=m):
+            r = TestClient(app).get(f"/missions/{m.id}", cookies=_cookie())
+        assert r.status_code == 200
+        assert r.json()["intent_text"] == m.intent_text
+
+    def test_get_missing_returns_404(self, monkeypatch):
+        from twaky import config as _cfg
+
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+
+        with patch("twaky.api.routers.missions.repository.get", return_value=None):
+            r = TestClient(app).get(f"/missions/{uuid4()}", cookies=_cookie())
+        assert r.status_code == 404
+
+
+class TestResume:
+    def test_resume_happy(self, monkeypatch):
+        from twaky import config as _cfg
+
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+
+        m = _fake_mission(state=MissionState.AWAITING_USER)
+        with (
+            patch("twaky.api.routers.missions.engine.resume"),
+            patch("twaky.api.routers.missions.repository.get", return_value=m),
+        ):
+            r = TestClient(app).post(
+                f"/missions/{m.id}/resume",
+                json={"user_response": {"approved": True}},
+                cookies=_cookie(),
+            )
+        assert r.status_code == 200
+
+    def test_resume_wrong_state_returns_409(self, monkeypatch):
+        from twaky import config as _cfg
+        from twaky.missions.guards import InvalidTransition
+
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+
+        m = _fake_mission(state=MissionState.RUNNING)
+        with (
+            patch(
+                "twaky.api.routers.missions.engine.resume",
+                side_effect=InvalidTransition("bad"),
+            ),
+            patch("twaky.api.routers.missions.repository.get", return_value=m),
+        ):
+            r = TestClient(app).post(
+                f"/missions/{m.id}/resume",
+                json={"user_response": {}},
+                cookies=_cookie(),
+            )
+        assert r.status_code == 409
+
+    def test_resume_missing_returns_404(self, monkeypatch):
+        from twaky import config as _cfg
+
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+
+        with patch("twaky.api.routers.missions.repository.get", return_value=None):
+            r = TestClient(app).post(
+                f"/missions/{uuid4()}/resume",
+                json={"user_response": {}},
+                cookies=_cookie(),
+            )
+        assert r.status_code == 404
+
+
+class TestCancel:
+    def test_cancel_happy(self, monkeypatch):
+        from twaky import config as _cfg
+
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+
+        m = _fake_mission()
+        with (
+            patch("twaky.api.routers.missions.engine.cancel"),
+            patch("twaky.api.routers.missions.repository.get", return_value=m),
+        ):
+            r = TestClient(app).post(
+                f"/missions/{m.id}/cancel",
+                json={"reason": "user_requested"},
+                cookies=_cookie(),
+            )
+        assert r.status_code == 200
+
+    def test_cancel_terminal_returns_409(self, monkeypatch):
+        from twaky import config as _cfg
+        from twaky.missions.guards import InvalidTransition
+
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+
+        m = _fake_mission(state=MissionState.DONE)
+        with (
+            patch(
+                "twaky.api.routers.missions.engine.cancel",
+                side_effect=InvalidTransition("bad"),
+            ),
+            patch("twaky.api.routers.missions.repository.get", return_value=m),
+        ):
+            r = TestClient(app).post(
+                f"/missions/{m.id}/cancel",
+                json={"reason": "x"},
+                cookies=_cookie(),
+            )
+        assert r.status_code == 409
