@@ -82,6 +82,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 500
+          minimum: 1
           default: 50
           title: Limit
       - name: offset
