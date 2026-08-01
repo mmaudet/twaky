@@ -6,9 +6,11 @@ import asyncio
 
 import typer
 
+from twaky.cli.atlas import app as atlas_app
 from twaky.config import settings
 
 app = typer.Typer(help="Twaky — graph agentic brick for Twake.")
+app.add_typer(atlas_app, name="atlas")
 
 
 @app.command()

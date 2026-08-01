@@ -21,10 +21,11 @@ RabbitMQ (rabbitmq:5672)                Postgres+AGE (twaky-pg:5432)
                           ▼
                   agent.graph.ingest  (durable + DLX/DLQ)
                           │
-                          ▼
-                    projector ──▶ Cypher MERGE ──▶ graph
-                          ▲
-                          └── agent (GraphCypherQAChain + LiteLLM + Langfuse trace)
+                          ├──▶ projector ──▶ Cypher MERGE ──▶ graph
+                          │
+                          └──▶ atlas (mission daemon + LangGraph checkpointer)
+                                    ▲
+                                    └── agent (GraphCypherQAChain + LiteLLM + Langfuse trace)
 ```
 
 - **Zero-impact captation**: new queue is prefixed `agent.*`, bound in `fanout` mode without a routing key — RabbitMQ delivers a *copy* to us, existing consumers (`tcalendar:audit`, `tcalendar:event:*:notification`, etc.) keep their traffic.
@@ -82,7 +83,7 @@ cp .env.example .env
 # Fill secrets (see the comment at the top of .env.example for openssl commands)
 
 docker compose up -d twaky-pg              # Postgres+AGE, waits for healthy
-docker compose up -d twaky-ingest twaky-projector
+docker compose up -d twaky-ingest twaky-projector twaky-atlas
 
 # End-to-end smoke test:
 docker compose run --rm twaky-agent twaky verify         # publishes a synthetic event
