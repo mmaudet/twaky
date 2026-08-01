@@ -39,7 +39,8 @@ class TestCalendarEventCreated:
     def test_minimal_event(self):
         stmts = self._mapper()({"uid": "e-1"})
         assert len(stmts) == 1
-        assert 'MERGE (e:CalendarEvent {uid: "e-1"})' in stmts[0]
+        assert stmts[0].startswith("MERGE (e:CalendarEvent {")
+        assert 'uid: "e-1"' in stmts[0]
 
     def test_full_event_has_organizer_and_attendees(self):
         stmts = self._mapper()(
@@ -91,3 +92,133 @@ class TestSabreContactCreated:
 
 def test_unknown_exchange_has_no_mapper():
     assert get_mapper("unknown:exchange") is None
+
+
+class TestExchangeAliases:
+    """created/updated/request share a mapper; deleted/cancel too; update/updated."""
+
+    def test_calendar_upsert_aliases(self):
+        m = get_mapper("calendar:event:created")
+        assert get_mapper("calendar:event:updated") is m
+        assert get_mapper("calendar:event:request") is m
+
+    def test_calendar_delete_aliases(self):
+        m = get_mapper("calendar:event:deleted")
+        assert get_mapper("calendar:event:cancel") is m
+
+    def test_sabre_contact_upsert_aliases(self):
+        m = get_mapper("sabre:contact:created")
+        assert get_mapper("sabre:contact:updated") is m
+        assert get_mapper("sabre:contact:update") is m
+
+    def test_reply_is_distinct(self):
+        assert get_mapper("calendar:event:reply") is not None
+
+
+class TestCalendarEventDeleted:
+    def _mapper(self):
+        m = get_mapper("calendar:event:deleted")
+        assert m is not None
+        return m
+
+    def test_no_uid_returns_empty(self):
+        assert self._mapper()({}) == []
+
+    def test_marks_deleted_true(self):
+        stmts = self._mapper()({"uid": "e-x"})
+        assert len(stmts) == 1
+        assert "SET e.deleted = true" in stmts[0]
+        assert '"e-x"' in stmts[0]
+
+
+class TestCalendarEventReply:
+    def _mapper(self):
+        m = get_mapper("calendar:event:reply")
+        assert m is not None
+        return m
+
+    def test_no_uid_returns_empty(self):
+        assert self._mapper()({"attendee": {"email": "a@x"}}) == []
+
+    def test_single_attendee_accepted(self):
+        stmts = self._mapper()(
+            {
+                "uid": "e-y",
+                "attendee": {"email": "b@x", "partstat": "ACCEPTED"},
+            }
+        )
+        assert len(stmts) == 1
+        assert "MERGE (p)-[r:ATTENDED]->(e)" in stmts[0]
+        assert 'SET r.status = "accepted"' in stmts[0]
+
+    def test_multi_attendee_bulk(self):
+        stmts = self._mapper()(
+            {
+                "uid": "e-y",
+                "attendees": [
+                    {"email": "b@x", "partstat": "DECLINED"},
+                    {"email": "c@x", "partstat": "TENTATIVE"},
+                ],
+            }
+        )
+        assert len(stmts) == 2
+        assert '"declined"' in stmts[0]
+        assert '"tentative"' in stmts[1]
+
+    def test_unknown_partstat_normalised(self):
+        stmts = self._mapper()(
+            {
+                "uid": "e-y",
+                "attendee": {"email": "b@x", "partstat": "NEEDS-ACTION"},
+            }
+        )
+        assert '"needs-action"' in stmts[0]
+
+
+class TestSabreContactDeleted:
+    def _mapper(self):
+        m = get_mapper("sabre:contact:deleted")
+        assert m is not None
+        return m
+
+    def test_marks_deleted(self):
+        stmts = self._mapper()({"email": "a@x"})
+        assert len(stmts) == 1
+        assert "SET p.deleted = true" in stmts[0]
+
+
+class TestCalendarEventUpsertWithVisio:
+    def _mapper(self):
+        return get_mapper("calendar:event:updated")
+
+    def test_meet_url_from_meetUrl_field(self):
+        stmts = self._mapper()(
+            {
+                "uid": "e-vz",
+                "meetUrl": "https://meet.example.com/room/abc",
+            }
+        )
+        combined = "\n".join(stmts)
+        assert 'meet_url: "https://meet.example.com/room/abc"' in combined
+
+    def test_meet_url_from_conference_uri(self):
+        stmts = self._mapper()(
+            {
+                "uid": "e-vz",
+                "conference": {"uri": "https://meet.example.com/xyz"},
+            }
+        )
+        assert 'meet_url: "https://meet.example.com/xyz"' in stmts[0]
+
+    def test_meet_url_from_location_when_url(self):
+        stmts = self._mapper()(
+            {
+                "uid": "e-vz",
+                "location": "https://meet.example.com/loc",
+            }
+        )
+        assert 'meet_url: "https://meet.example.com/loc"' in stmts[0]
+
+    def test_deleted_re_asserted_false(self):
+        stmts = self._mapper()({"uid": "e-vz"})
+        assert "deleted: false" in stmts[0]
