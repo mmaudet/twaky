@@ -14,6 +14,12 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    # --- Owner scoping (required — fail-fast if missing) ---
+    twaky_owner_email: str = Field(
+        ...,  # required — no default
+        description="Email of the sole owner this instance serves.",
+    )
+
     # --- Twaky Postgres+AGE ---
     twaky_pg_host: str = Field(default="twaky-pg")
     twaky_pg_port: int = Field(default=5432)
@@ -27,7 +33,14 @@ class Settings(BaseSettings):
 
     # --- Ingest ---
     agent_exchanges: str = Field(
-        default="calendar:event:created,sabre:contact:created",
+        default=(
+            "calendar:event:created,calendar:event:updated,calendar:event:request,"
+            "calendar:event:deleted,calendar:event:cancel,calendar:event:reply,"
+            "sabre:contact:created,sabre:contact:updated,sabre:contact:update,"
+            "sabre:contact:deleted,"
+            "mail:message:received,mail:message:expunged,"
+            "mail:message:flags:updated,mail:message:moved"
+        ),
         description="Comma-separated fanout exchanges to bind to.",
     )
     agent_queue: str = Field(default="agent.graph.ingest")
