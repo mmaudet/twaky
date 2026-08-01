@@ -36,7 +36,10 @@ async def test_declare_list_detail_cancel_cycle(monkeypatch):
 
     cookie = sign_session("alice@x")
 
-    async with httpx.AsyncClient(app=app, base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
         client.cookies.set(SESSION_COOKIE_NAME, cookie)
 
         # 1. Declare

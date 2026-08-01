@@ -44,7 +44,7 @@ def declare(body: DeclareBody, email: str = Depends(require_owner)) -> Mission:
 @router.get("", response_model=list[Mission])
 def list_missions(
     state: Annotated[MissionState | None, Query()] = None,
-    limit: int = 50,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: int = 0,
     email: str = Depends(require_owner),
 ) -> list[Mission]:
@@ -77,7 +77,8 @@ def resume_mission(
     except InvalidTransition as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     refetched = repository.get(mid)
-    assert refetched is not None  # engine call succeeded, mission must exist
+    if refetched is None:
+        raise HTTPException(status_code=500, detail="mission vanished after transition")
     return refetched
 
 
@@ -94,7 +95,8 @@ def cancel_mission(
     except InvalidTransition as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     refetched = repository.get(mid)
-    assert refetched is not None  # engine call succeeded, mission must exist
+    if refetched is None:
+        raise HTTPException(status_code=500, detail="mission vanished after transition")
     return refetched
 
 

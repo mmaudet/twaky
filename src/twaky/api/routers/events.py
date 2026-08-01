@@ -7,7 +7,7 @@ import json
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from twaky.api.deps import get_broker, require_owner
@@ -34,9 +34,8 @@ async def _stream_events(broker: SSEBroker) -> AsyncIterator[str]:
 
 @router.get("/events")
 async def events(
-    request: Request,
-    _: str = Depends(require_owner),
-    broker: Annotated[SSEBroker, Depends(get_broker)] = ...,  # type: ignore[assignment]
+    _: Annotated[str, Depends(require_owner)],
+    broker: Annotated[SSEBroker, Depends(get_broker)],
 ) -> StreamingResponse:
     return StreamingResponse(_stream_events(broker), media_type="text/event-stream")
 

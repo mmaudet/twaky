@@ -95,6 +95,7 @@ services:
       start_period: 30s
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=twake-network"
       - "traefik.http.routers.twaky-api.rule=Host(`twaky.${BASE_DOMAIN}`)"
       - "traefik.http.routers.twaky-api.entrypoints=websecure"
       - "traefik.http.routers.twaky-api.tls=true"
