@@ -9,6 +9,8 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "aio-pika>=9.5",
+    "authlib>=1.4",
+    "httpx>=0.28",
     "langchain>=1.0",
     "langchain-community>=0.3",
     "langchain-core>=0.3",
@@ -23,6 +25,7 @@ dependencies = [
     "pydantic-settings>=2.7",
     "python-dotenv>=1.0",
     "structlog>=25.1",
+    "trafilatura>=1.12",
     "typer>=0.15",
 ]
 

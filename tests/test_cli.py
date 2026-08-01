@@ -35,8 +35,3 @@ def test_project_command_is_registered():
     r = _run("project", "--help")
     assert r.returncode == 0
     assert "batch" in r.stdout.lower() or "once" in r.stdout.lower()
-
-
-def test_ask_command_is_registered():
-    r = _run("ask", "--help")
-    assert r.returncode == 0

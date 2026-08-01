@@ -67,6 +67,19 @@ services:
       twaky-pg: { condition: service_healthy }
     command: ["twaky", "project"]
 
+  twaky-atlas:
+    <<: *python-common
+    container_name: twaky-atlas
+    depends_on:
+      twaky-pg: { condition: service_healthy }
+    command: ["twaky", "atlas", "run"]
+    healthcheck:
+      test: ["CMD", "twaky", "atlas", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
   # Interactive: not started by `docker compose up`; use
   #   docker compose run --rm twaky-agent twaky ask "..."
   twaky-agent:

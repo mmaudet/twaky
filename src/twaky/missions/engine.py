@@ -85,6 +85,8 @@ def declare(
         updated_at=now,
     )
     repository.insert(m)
+    # Wake the atlas daemon.
+    _notify("mission_declared", str(m.id))
     with _trace("declare", m.id, extra={"intent_text": intent_text}):
         pass
     _flush()
@@ -155,6 +157,7 @@ def resume(mission_id: UUID, user_response: dict[str, Any]) -> None:
                 "payload": user_response,
             },
         )
+    _notify("mission_resumed", str(mission_id))
     _flush()
 
 
@@ -193,6 +196,16 @@ def cancel(mission_id: UUID, reason: str) -> None:
     with _trace("cancel", mission_id, extra={"reason": reason}):
         _transition(mission_id, MissionState.CANCELLED, reason=reason)
     _flush()
+
+
+def _notify(channel: str, payload: str) -> None:
+    """Fire-and-forget PG NOTIFY; never raise from the engine path."""
+    try:
+        with get_pool().connection() as conn, conn.cursor() as cur:
+            cur.execute(f"NOTIFY {channel}, %s", (payload,))
+            conn.commit()
+    except Exception:  # noqa: BLE001, S110
+        pass
 
 
 __all__ = [

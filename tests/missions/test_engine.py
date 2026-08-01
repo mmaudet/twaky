@@ -123,3 +123,48 @@ class TestLangfuseInstrumentation:
         assert any(n.startswith("mission.start_planning") for n in seen)
         assert any(n.startswith("mission.cancel") for n in seen)
         _cleanup(m.id)
+
+
+class TestEngineNotify:
+    """engine.declare and engine.resume emit PG NOTIFY events."""
+
+    def test_declare_notifies_mission_declared(self):
+        import psycopg
+
+        from twaky.missions import engine as _engine
+
+        with psycopg.connect(_dsn(), autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("LISTEN mission_declared")
+            m = _engine.declare(
+                intent_text="notify", owner_email="a@x", declared_by="a@x"
+            )
+            conn.execute("SELECT 1")  # flush
+            notified = []
+            for n in conn.notifies(timeout=2):
+                notified.append(n.payload)
+                break
+        assert str(m.id) in notified
+        _cleanup(m.id)
+
+    def test_resume_notifies_mission_resumed(self):
+        import psycopg
+
+        from twaky.missions import engine as _engine
+        from twaky.missions.models import PlanStep
+
+        m = _engine.declare(
+            intent_text="notify-resume", owner_email="a@x", declared_by="a@x"
+        )
+        _engine.start_planning(m.id)
+        _engine.commit_plan(m.id, [PlanStep(agent="atlas", tool="noop", args={})])
+        _engine.request_user_input(m.id, reason="ok", artifact={"draft": "x"})
+        with psycopg.connect(_dsn(), autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("LISTEN mission_resumed")
+            _engine.resume(m.id, user_response={"ok": True})
+            conn.execute("SELECT 1")
+            notified = []
+            for n in conn.notifies(timeout=2):
+                notified.append(n.payload)
+                break
+        assert str(m.id) in notified
+        _cleanup(m.id)
