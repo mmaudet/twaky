@@ -22,7 +22,7 @@ is re-asserted (an updated/created event is a resurrection).
 
 from __future__ import annotations
 
-from twaky.mappers._cypher import cql_literal, props
+from twaky.mappers._cypher import cql_literal
 
 
 def _person(email: str, cn: str | None) -> str:
@@ -52,18 +52,28 @@ def map_event(payload: dict) -> list[str]:
     if not uid:
         return []  # cannot merge without a natural key
 
-    event_props = {
-        "uid": uid,
+    # MERGE ONLY on the natural key (uid) — mutable properties go in SET.
+    # If MERGE included e.g. summary, an update-with-changed-title would
+    # create a duplicate node instead of updating the existing one.
+    # openCypher reserves `end` (and marginally `start`); we rename both to
+    # `start_at` / `end_at` to avoid SET-clause parser errors on AGE.
+    settable = {
         "summary": payload.get("summary"),
         "description": payload.get("description"),
         "location": payload.get("location"),
-        "start": payload.get("start"),
-        "end": payload.get("end"),
+        "start_at": payload.get("start"),
+        "end_at": payload.get("end"),
         "meet_url": _extract_meet_url(payload),
-        # Re-assert not-deleted on any create/update — supports "undelete" scenarios.
+        # Re-assert not-deleted on any create/update — supports "undelete".
         "deleted": False,
     }
-    stmts: list[str] = [f"MERGE (e:CalendarEvent {props(event_props)})"]
+    set_frag = ", ".join(
+        f"e.{k} = {cql_literal(v)}" for k, v in settable.items() if v is not None
+    )
+    stmt = f"MERGE (e:CalendarEvent {{uid: {cql_literal(uid)}}})"
+    if set_frag:
+        stmt += f" SET {set_frag}"
+    stmts: list[str] = [stmt]
 
     organizer = payload.get("organizer") or {}
     org_email = organizer.get("email")

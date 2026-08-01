@@ -199,7 +199,7 @@ class TestCalendarEventUpsertWithVisio:
             }
         )
         combined = "\n".join(stmts)
-        assert 'meet_url: "https://meet.example.com/room/abc"' in combined
+        assert 'e.meet_url = "https://meet.example.com/room/abc"' in combined
 
     def test_meet_url_from_conference_uri(self):
         stmts = self._mapper()(
@@ -208,7 +208,7 @@ class TestCalendarEventUpsertWithVisio:
                 "conference": {"uri": "https://meet.example.com/xyz"},
             }
         )
-        assert 'meet_url: "https://meet.example.com/xyz"' in stmts[0]
+        assert 'e.meet_url = "https://meet.example.com/xyz"' in stmts[0]
 
     def test_meet_url_from_location_when_url(self):
         stmts = self._mapper()(
@@ -217,8 +217,8 @@ class TestCalendarEventUpsertWithVisio:
                 "location": "https://meet.example.com/loc",
             }
         )
-        assert 'meet_url: "https://meet.example.com/loc"' in stmts[0]
+        assert 'e.meet_url = "https://meet.example.com/loc"' in stmts[0]
 
     def test_deleted_re_asserted_false(self):
         stmts = self._mapper()({"uid": "e-vz"})
-        assert "deleted: false" in stmts[0]
+        assert "e.deleted = false" in stmts[0]

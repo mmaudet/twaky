@@ -11,7 +11,7 @@ Payload shape (approx):
 
 from __future__ import annotations
 
-from twaky.mappers._cypher import cql_literal, props
+from twaky.mappers._cypher import cql_literal
 
 
 def map_event(payload: dict) -> list[str]:
@@ -19,12 +19,19 @@ def map_event(payload: dict) -> list[str]:
     if not email:
         return []
 
-    person_props = {
-        "email": email,
+    # MERGE on email only; other props go in SET so updates don't create dupes.
+    settable = {
         "fn": payload.get("fn"),
         "tel": payload.get("tel"),
+        "deleted": False,
     }
-    stmts: list[str] = [f"MERGE (p:Person {props(person_props)})"]
+    set_frag = ", ".join(
+        f"p.{k} = {cql_literal(v)}" for k, v in settable.items() if v is not None
+    )
+    stmt = f"MERGE (p:Person {{email: {cql_literal(email)}}})"
+    if set_frag:
+        stmt += f" SET {set_frag}"
+    stmts: list[str] = [stmt]
 
     org = payload.get("org")
     if org:
