@@ -132,7 +132,19 @@ def _run_mission_sync(mid: UUID) -> None:
     graph = build_atlas_agent(checkpointer=get_checkpointer())
     config = {"configurable": {"thread_id": str(mid)}}
 
-    is_resume = m.state == MissionState.RUNNING
+    if m.state == MissionState.PLANNING:
+        # A PLANNING mission's checkpoint has no useful LangGraph state
+        # (planning hasn't reached graph.invoke yet). Auto-fail with a
+        # descriptive reason rather than start_planning() → InvalidTransition.
+        engine.finish(
+            mid,
+            outcome="failed",
+            artifacts=[],
+            reason="checkpoint_lost_during_planning",
+        )
+        return
+
+    is_resume = m.state in (MissionState.RUNNING, MissionState.AWAITING_USER)
 
     if not is_resume:
         # Fresh mission: run through the planning transitions first.
