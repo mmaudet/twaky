@@ -22,7 +22,7 @@ BIND_COUNT=$(docker exec rabbitmq rabbitmqctl list_bindings -p / source_name des
 pass "T1 · $BIND_COUNT bindings on calendar:event:created (agent + existing consumers)"
 
 info "T2 · publish synthetic event uid=$UID1 and expect it in event_log"
-docker compose run --rm twaky-agent twaky verify --uid "$UID1" >/dev/null
+docker compose run --rm --no-deps twaky-agent twaky verify --uid "$UID1" >/dev/null
 sleep 3
 COUNT=$(docker exec twaky-pg psql -tAU twaky -d twaky -c "SELECT count(*) FROM event_log WHERE payload->>'uid'='$UID1';")
 [[ "$COUNT" == "1" ]] || fail "expected 1 event_log row for $UID1, got $COUNT"
@@ -39,7 +39,7 @@ SQL
 pass "T2b · CalendarEvent{uid=$UID1} present in graph"
 
 info "T3 · idempotence: republish same event, expect count stays 1"
-docker compose run --rm twaky-agent twaky verify --uid "$UID1" >/dev/null
+docker compose run --rm --no-deps twaky-agent twaky verify --uid "$UID1" >/dev/null
 sleep 3
 COUNT=$(docker exec twaky-pg psql -tAU twaky -d twaky -c "SELECT count(*) FROM event_log WHERE payload->>'uid'='$UID1';")
 [[ "$COUNT" == "1" ]] || fail "expected event_log still has 1 row (dedup), got $COUNT"
@@ -62,7 +62,7 @@ if [[ -z "${OPENROUTER_API_KEY:-}${OPENAI_API_KEY:-}${ANTHROPIC_API_KEY:-}" ]]; 
     echo -e "${YELLOW}SKIP${NC} T5/T7 · no LLM API key in .env (set OPENROUTER/OPENAI/ANTHROPIC_API_KEY)"
 else
     info "T5 · twaky ask 'Who attended $UID1?'"
-    OUT=$(docker compose run --rm twaky-agent twaky ask "Who attended the event with uid $UID1?" 2>&1)
+    OUT=$(docker compose run --rm --no-deps twaky-agent twaky ask "Who attended the event with uid $UID1?" 2>&1)
     echo "$OUT" | grep -q "Cypher generated" || fail "no Cypher generated line in output"
     ANSWER=$(echo "$OUT" | grep -A1 '^Q:' | tail -1 | sed 's/^A: //')
     pass "T5 · agent answered: '$ANSWER'"

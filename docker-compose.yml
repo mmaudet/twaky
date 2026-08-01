@@ -222,11 +222,19 @@ services:
     environment: *langfuse-env
     networks: [twake-network]
 
+# Explicit `name:` on every volume so they resolve identically whether
+# twaky is launched standalone (`docker compose up` from this dir, project
+# "twaky") or via the deploy root include (project "kickstart-maudet-cloud").
+# Without this, docker prefixes with the project name → different volumes.
 volumes:
   twaky_pg_data:
+    name: twaky_pg_data
   twaky_clickhouse_data:
+    name: twaky_clickhouse_data
   twaky_redis_data:
+    name: twaky_redis_data
   twaky_seaweedfs_data:
+    name: twaky_seaweedfs_data
 
 networks:
   twake-network:
