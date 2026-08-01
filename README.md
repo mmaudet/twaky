@@ -76,6 +76,43 @@ body fetching (JMAP) is deferred to sub-project 2.
 The `twaky:message:*` federation envelope is documented in
 `src/twaky/missions/envelope.py` but not wired — sub-project 4.
 
+## Agents + Atlas (sub-project 2)
+
+`twaky-atlas` is a daemon container that watches the mission table and
+drives each `declared` mission through a LangGraph StateGraph — the
+Supervisor pattern:
+
+    Atlas (orchestrator LLM)
+       ├─ delegate_to_chronos(query)   → Chronos StateGraph (calendar tools)
+       ├─ delegate_to_plume(query)     → Plume StateGraph  (JMAP + drafts)
+       ├─ delegate_to_iris(query)      → Iris StateGraph   (SearXNG + graph)
+       └─ finish_mission(answer, outcome)
+
+Configuration:
+
+- `TWAKY_ATLAS_MAX_CONCURRENT_MISSIONS` (default 4) — bounded parallelism.
+- `ATLAS_MODEL / CHRONOS_MODEL / PLUME_MODEL / IRIS_MODEL` — override the
+  global `MODEL` per specialist. All fall back to `MODEL` when unset.
+- Plume authenticates to JMAP via OIDC token exchange
+  (`PLUME_OIDC_CLIENT_ID / _SECRET / _ISSUER`). Requires a `twaky-plume`
+  client in LemonLDAP-NG — add it to the deploy repo's
+  `twake_auth/config/lmConf-1.json.ldap.template`.
+- Iris uses SearXNG on `twake-network` at `SEARXNG_ENDPOINT`.
+
+Demo scenarios:
+
+    bash scripts/seed-demo.sh
+    twaky mission declare "Résume ma journée de demain" --wait
+    twaky mission declare "Draft a reply to demo-msg-1" --wait
+    twaky mission resume <mid> --input '{"approved": true}'
+
+Or all in one:
+
+    make scenarios-agents
+
+Traces group under `mission-<id>` in Langfuse; cost by agent surfaces in
+Metabase via ClickHouse tags.
+
 ## Quickstart
 
 ```bash
