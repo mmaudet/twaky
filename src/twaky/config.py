@@ -52,6 +52,7 @@ class Settings(BaseSettings):
 
     # --- Langfuse ---
     langfuse_host: str | None = Field(default=None)
+    langfuse_project_id: str | None = Field(default=None)
     langfuse_public_key: str | None = Field(default=None)
     langfuse_secret_key: str | None = Field(default=None)
     langfuse_public_url: str | None = Field(default=None)

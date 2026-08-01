@@ -41,3 +41,19 @@ class TestApiSettings:
         assert s.api_oidc_client_id == "twaky-api"
         assert s.api_oidc_client_secret == "s3cret"
         assert s.api_oidc_issuer == "https://auth.twake-dev.maudet.cloud/"
+
+
+class TestLangfuseSettings:
+    def test_langfuse_project_id_default(self, monkeypatch):
+        monkeypatch.delenv("LANGFUSE_PROJECT_ID", raising=False)
+        s = _s(monkeypatch)
+        assert s.langfuse_project_id is None
+
+    def test_langfuse_host_and_project_id_override(self, monkeypatch):
+        s = _s(
+            monkeypatch,
+            LANGFUSE_HOST="https://langfuse.example.com",
+            LANGFUSE_PROJECT_ID="my-project",
+        )
+        assert s.langfuse_host == "https://langfuse.example.com"
+        assert s.langfuse_project_id == "my-project"

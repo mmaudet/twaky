@@ -6,9 +6,12 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from twaky.api.deps import require_owner
+from twaky.api.errors import error_response
+from twaky.config import settings as _settings
 from twaky.missions import engine, repository
 from twaky.missions.guards import InvalidTransition
 from twaky.missions.models import Mission, MissionState
@@ -93,6 +96,24 @@ def cancel_mission(
     refetched = repository.get(mid)
     assert refetched is not None  # engine call succeeded, mission must exist
     return refetched
+
+
+@router.get("/{mid}/trace")
+def mission_trace(mid: UUID, email: str = Depends(require_owner)):
+    """Redirect to the mission's Langfuse session."""
+    m = repository.get(mid)
+    if m is None or m.owner_email != email:
+        raise HTTPException(status_code=404, detail="mission not found")
+    host = getattr(_settings, "langfuse_host", "") or ""
+    project_id = getattr(_settings, "langfuse_project_id", "") or ""
+    if not host or not project_id:
+        return error_response(
+            code="langfuse_not_configured",
+            message="langfuse host or project id not set",
+            status_code=503,
+        )
+    url = f"{host.rstrip('/')}/project/{project_id}/sessions/mission-{mid}"
+    return RedirectResponse(url=url, status_code=302)
 
 
 __all__ = ["router"]

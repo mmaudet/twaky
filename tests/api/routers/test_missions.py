@@ -293,3 +293,38 @@ class TestCancel:
                 cookies=_cookie(),
             )
         assert r.status_code == 404
+
+
+class TestTrace:
+    def test_trace_redirects_to_langfuse(self, monkeypatch):
+        from twaky import config as _cfg
+
+        monkeypatch.setenv("LANGFUSE_HOST", "https://langfuse.example.com")
+        monkeypatch.setenv("LANGFUSE_PROJECT_ID", "proj-42")
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+        monkeypatch.setattr("twaky.api.routers.missions._settings", new_settings)
+        m = _fake_mission()
+        with patch("twaky.api.routers.missions.repository.get", return_value=m):
+            r = TestClient(app).get(
+                f"/missions/{m.id}/trace", cookies=_cookie(), follow_redirects=False
+            )
+        assert r.status_code == 302
+        loc = r.headers["location"]
+        assert "langfuse.example.com" in loc
+        assert f"mission-{m.id}" in loc
+
+    def test_trace_missing_config_returns_503(self, monkeypatch):
+        from twaky import config as _cfg
+
+        monkeypatch.setenv("LANGFUSE_HOST", "")
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+        monkeypatch.setattr("twaky.api.routers.missions._settings", new_settings)
+        m = _fake_mission()
+        with patch("twaky.api.routers.missions.repository.get", return_value=m):
+            r = TestClient(app).get(
+                f"/missions/{m.id}/trace", cookies=_cookie(), follow_redirects=False
+            )
+        assert r.status_code == 503
+        assert r.json()["error"]["code"] == "langfuse_not_configured"
