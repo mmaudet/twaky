@@ -6,8 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.responses import RedirectResponse
 
 from twaky.api.main import app
+from twaky.api.routers.oauth import _safe_return_to
 from twaky.api.session import SESSION_COOKIE_NAME
 
 
@@ -21,20 +23,37 @@ def _oidc_env(monkeypatch):
     monkeypatch.setenv("API_BASE_URL", "https://twaky.example.com")
 
 
+class TestSafeReturnTo:
+    """Unit tests for the open-redirect guard helper."""
+
+    def test_relative_path_unchanged(self):
+        assert _safe_return_to("/missions") == "/missions"
+
+    def test_absolute_url_rejected(self):
+        assert _safe_return_to("https://evil.com/") == "/"
+
+    def test_protocol_relative_rejected(self):
+        assert _safe_return_to("//evil.com/") == "/"
+
+    def test_backslash_rejected(self):
+        assert _safe_return_to("/valid\\path") == "/"
+
+    def test_empty_string_rejected(self):
+        assert _safe_return_to("") == "/"
+
+
 class TestLogin:
     def test_redirects_to_authorize(self):
+        # Return a real RedirectResponse so FastAPI's routing layer (which
+        # inspects .background and calls the ASGI interface) works unchanged.
+        fake_redirect = RedirectResponse(
+            url="https://auth.example.com/oauth2/authorize?...",
+            status_code=302,
+        )
         with patch("twaky.api.routers.oauth.oauth_client") as make:
             oauth = MagicMock()
             client = MagicMock()
-            client.authorize_redirect = AsyncMock(
-                return_value=MagicMock(
-                    status_code=302,
-                    headers={
-                        "location": "https://auth.example.com/oauth2/authorize?...",
-                        "set-cookie": "",
-                    },
-                )
-            )
+            client.authorize_redirect = AsyncMock(return_value=fake_redirect)
             oauth.twaky_api = client
             make.return_value = oauth
             r = TestClient(app).get(
@@ -52,7 +71,14 @@ class TestCallback:
         )
         assert r.status_code == 400
 
-    def test_email_not_owner_returns_403(self):
+    def test_email_not_owner_returns_403(self, monkeypatch):
+        # Patch the settings singleton the route reads so the owner is "alice@x".
+        from twaky import config as _cfg
+
+        monkeypatch.setattr(
+            "twaky.api.routers.oauth.settings",
+            _cfg.Settings(_env_file=None),
+        )
         with patch("twaky.api.routers.oauth.oauth_client") as make:
             oauth = MagicMock()
             client = MagicMock()
@@ -69,7 +95,14 @@ class TestCallback:
             )
         assert r.status_code == 403
 
-    def test_owner_email_sets_session(self):
+    def test_owner_email_sets_session(self, monkeypatch):
+        # Patch the settings singleton the route reads so the owner is "alice@x".
+        from twaky import config as _cfg
+
+        monkeypatch.setattr(
+            "twaky.api.routers.oauth.settings",
+            _cfg.Settings(_env_file=None),
+        )
         with patch("twaky.api.routers.oauth.oauth_client") as make:
             oauth = MagicMock()
             client = MagicMock()
