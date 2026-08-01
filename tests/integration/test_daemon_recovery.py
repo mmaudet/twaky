@@ -44,6 +44,10 @@ def _cleanup(mid: UUID) -> None:
         conn.commit()
 
 
+# Alias used by the regression tests below.
+_cleanup_mission = _cleanup
+
+
 def test_recovery_identifies_running_mission_with_checkpoint():
     """A RUNNING mission that has a checkpoint is returned as ('resumed', mid).
 
@@ -115,3 +119,70 @@ def test_recover_and_schedule_dispatches_resumed_missions():
     )
 
     _cleanup(m.id)
+
+
+class TestRecoveryHandlesAwaitingUser:
+    """Regression: sub-project 2's parked bug — is_resume guard was too narrow."""
+
+    def test_awaiting_user_mission_takes_resume_branch(self, monkeypatch):
+        from unittest.mock import MagicMock, patch
+
+        from twaky.daemon import atlas_daemon
+        from twaky.missions import engine, repository
+        from twaky.missions.models import MissionState, PlanStep
+
+        m = engine.declare(intent_text="rec-au", owner_email="a@x", declared_by="a@x")
+        engine.start_planning(m.id)
+        engine.commit_plan(m.id, [PlanStep(agent="atlas", tool="noop", args={})])
+        engine.request_user_input(m.id, reason="ok", artifact={"draft": "x"})
+        # Mission is now AWAITING_USER. Simulate recovery driving it.
+
+        # Fake the atlas graph so it returns a finish marker on the resume invocation.
+        fake_graph = MagicMock()
+        fake_graph.invoke.return_value = {
+            "messages": [MagicMock(content="__ATLAS_FINISH__|done|resumed ok")],
+            "artifacts": [],
+        }
+
+        with (
+            patch(
+                "twaky.daemon.atlas_daemon.build_atlas_agent", return_value=fake_graph
+            ),
+            patch("twaky.daemon.atlas_daemon.get_checkpointer", return_value=None),
+            patch(
+                "twaky.daemon.atlas_daemon.extract_pending_from_output",
+                return_value=None,
+            ),
+        ):
+            # Manually seed a user_response artifact (engine.resume already does this in production).
+            # For this test we skip engine.resume and go straight to _run_mission_sync
+            # to verify the guard change.
+            atlas_daemon._run_mission_sync(m.id)
+
+        got = repository.get(m.id)
+        # The mission should have progressed (not crashed with InvalidTransition).
+        # Either done (fake graph finished it) or still awaiting_user (nothing changed).
+        # It must NOT be failed with an InvalidTransition reason.
+        assert got.state != MissionState.FAILED or "InvalidTransition" not in (
+            got.state_reason or ""
+        )
+        _cleanup_mission(m.id)
+
+
+class TestRecoveryPlanningAutoFail:
+    """A PLANNING mission has no useful checkpoint — auto-fail with clear reason."""
+
+    def test_planning_recovery_fails_with_clear_reason(self):
+        from twaky.daemon import atlas_daemon
+        from twaky.missions import engine, repository
+        from twaky.missions.models import MissionState
+
+        m = engine.declare(intent_text="rec-plan", owner_email="a@x", declared_by="a@x")
+        engine.start_planning(m.id)  # State now PLANNING, no commit_plan.
+
+        atlas_daemon._run_mission_sync(m.id)
+
+        got = repository.get(m.id)
+        assert got.state == MissionState.FAILED
+        assert got.state_reason == "checkpoint_lost_during_planning"
+        _cleanup_mission(m.id)

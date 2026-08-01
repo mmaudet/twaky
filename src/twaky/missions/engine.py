@@ -85,6 +85,8 @@ def declare(
         updated_at=now,
     )
     repository.insert(m)
+    # Unified channel for API SSE consumers.
+    _notify_state_change(m.id, MissionState.DECLARED)
     # Wake the atlas daemon.
     _notify("mission_declared", str(m.id))
     with _trace("declare", m.id, extra={"intent_text": intent_text}):
@@ -120,6 +122,7 @@ def _transition(
         params.append(mission_id)
         cur.execute(f"UPDATE mission SET {', '.join(sets)} WHERE id = %s", params)
         conn.commit()
+    _notify_state_change(mission_id, to_state)
 
 
 def start_planning(mission_id: UUID) -> None:
@@ -189,6 +192,7 @@ def finish(
             ),
         )
         conn.commit()
+    _notify_state_change(mission_id, target)
     _flush()
 
 
@@ -196,6 +200,18 @@ def cancel(mission_id: UUID, reason: str) -> None:
     with _trace("cancel", mission_id, extra={"reason": reason}):
         _transition(mission_id, MissionState.CANCELLED, reason=reason)
     _flush()
+
+
+def _notify_state_change(mission_id: UUID, new_state: MissionState) -> None:
+    """Emit unified mission_changed NOTIFY for API SSE consumers."""
+    payload = json.dumps(
+        {
+            "mission_id": str(mission_id),
+            "state": new_state.value,
+            "at": datetime.now(UTC).isoformat(),
+        }
+    )
+    _notify("mission_changed", payload)
 
 
 def _notify(channel: str, payload: str) -> None:

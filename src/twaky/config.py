@@ -52,6 +52,7 @@ class Settings(BaseSettings):
 
     # --- Langfuse ---
     langfuse_host: str | None = Field(default=None)
+    langfuse_project_id: str | None = Field(default=None)
     langfuse_public_key: str | None = Field(default=None)
     langfuse_secret_key: str | None = Field(default=None)
     langfuse_public_url: str | None = Field(default=None)
@@ -91,6 +92,13 @@ class Settings(BaseSettings):
     plume_oidc_client_id: str = Field(default="")
     plume_oidc_client_secret: str = Field(default="")
     plume_oidc_issuer: str = Field(default="")
+
+    # --- Sub-project 3a: API ---
+    api_base_url: str = Field(default="http://twaky-api:8000")
+    api_session_secret: str = Field(default="")
+    api_oidc_client_id: str = Field(default="")
+    api_oidc_client_secret: str = Field(default="")
+    api_oidc_issuer: str = Field(default="")
 
     @property
     def exchanges(self) -> list[str]:

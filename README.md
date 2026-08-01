@@ -113,6 +113,74 @@ Or all in one:
 Traces group under `mission-<id>` in Langfuse; cost by agent surfaces in
 Metabase via ClickHouse tags.
 
+## Consuming twaky-api (sub-project 3a)
+
+`twaky-api` is a FastAPI container that exposes the mission engine over
+REST + SSE. Auth is a cookie-only OIDC session against LemonLDAP-NG
+(client `twaky-api` provisioned in the deploy repo).
+
+Base URL (dev): `https://twaky.${BASE_DOMAIN}`
+
+### Login flow (browser)
+
+1. Navigate to `/oauth/login`.
+2. Authenticate against LemonLDAP-NG.
+3. Redirected back with a signed session cookie (HttpOnly, SameSite=Lax, 8h).
+
+### CLI / test usage (bypass OIDC)
+
+On the twaky-api container:
+
+```bash
+docker compose exec twaky-api uv run python scripts/sign-session.py \
+    michel.maudet@linagora.com
+# prints the signed cookie value
+```
+
+Then hit the API with `curl`:
+
+```bash
+COOKIE=<the cookie value>
+curl -H "Cookie: twaky_session=$COOKIE" \
+     https://twaky.${BASE_DOMAIN}/missions
+
+curl -H "Cookie: twaky_session=$COOKIE" \
+     -H "Content-Type: application/json" \
+     -d '{"intent_text":"Résume ma journée de demain"}' \
+     -X POST https://twaky.${BASE_DOMAIN}/missions
+```
+
+### SSE
+
+```bash
+curl -N -H "Cookie: twaky_session=$COOKIE" \
+     https://twaky.${BASE_DOMAIN}/events
+```
+
+Emits one `mission_changed` event per state transition; keep-alive comment
+every 15 s.
+
+### OpenAPI schema
+
+`docs/api/openapi.yaml` is the source of truth for client generation.
+Regenerate with `make openapi`. CI enforces no drift.
+
+Sub-project 3b (Frontend Control Tower) consumes this file:
+
+```bash
+# Generate a typed TypeScript client
+npx openapi-typescript-codegen --input docs/api/openapi.yaml --output frontend/src/api
+
+# Or spin a local mock backend for frontend dev
+npx @stoplight/prism-cli mock docs/api/openapi.yaml
+```
+
+### End-to-end scenario
+
+```bash
+make scenarios-api
+```
+
 ## Quickstart
 
 ```bash

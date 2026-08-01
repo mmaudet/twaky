@@ -1,4 +1,4 @@
-.PHONY: help up down build logs test verify verify-clean backup backup-dry restore scenarios-foundations scenarios-agents
+.PHONY: help up down build logs test verify verify-clean backup backup-dry restore scenarios-foundations scenarios-agents scenarios-api openapi
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -46,3 +46,11 @@ scenarios-foundations: ## Run the Foundations end-to-end scenario
 
 scenarios-agents: ## Run the Agents+Atlas end-to-end scenario
 	bash scripts/scenarios-agents.sh
+
+scenarios-api: ## Run the API end-to-end scenario
+	bash scripts/scenarios-api.sh
+
+openapi: ## Regenerate docs/api/openapi.yaml from the FastAPI app
+	@mkdir -p docs/api
+	@uv run python -m twaky.api.export_openapi > docs/api/openapi.yaml
+	@echo "wrote docs/api/openapi.yaml"

@@ -1,0 +1,476 @@
+openapi: 3.1.0
+info:
+  title: Twaky API
+  description: HTTP + SSE surface over the Twaky mission engine.
+  version: 0.1.0
+paths:
+  /healthz:
+    get:
+      tags:
+      - health
+      summary: Healthz
+      operationId: healthz_healthz_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Healthz Healthz Get
+  /me:
+    get:
+      tags:
+      - me
+      summary: Me
+      operationId: me_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Me Me Get
+  /missions:
+    post:
+      tags:
+      - missions
+      summary: Declare
+      description: Declare a new mission. The daemon will pick it up via NOTIFY.
+      operationId: declare_missions_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeclareBody'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mission'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - missions
+      summary: List Missions
+      description: List live missions for the instance owner.
+      operationId: list_missions_missions_get
+      parameters:
+      - name: state
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/MissionState'
+          - type: 'null'
+          title: State
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Mission'
+                title: Response List Missions Missions Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /missions/{mid}:
+    get:
+      tags:
+      - missions
+      summary: Get Mission
+      description: Get a single mission by ID.
+      operationId: get_mission_missions__mid__get
+      parameters:
+      - name: mid
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Mid
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mission'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /missions/{mid}/resume:
+    post:
+      tags:
+      - missions
+      summary: Resume Mission
+      description: Resume a mission awaiting user input.
+      operationId: resume_mission_missions__mid__resume_post
+      parameters:
+      - name: mid
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Mid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResumeBody'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mission'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /missions/{mid}/cancel:
+    post:
+      tags:
+      - missions
+      summary: Cancel Mission
+      description: Cancel a mission.
+      operationId: cancel_mission_missions__mid__cancel_post
+      parameters:
+      - name: mid
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Mid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelBody'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mission'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /missions/{mid}/trace:
+    get:
+      tags:
+      - missions
+      summary: Mission Trace
+      description: Redirect to the mission's Langfuse session.
+      operationId: mission_trace_missions__mid__trace_get
+      parameters:
+      - name: mid
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Mid
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /oauth/login:
+    get:
+      tags:
+      - oauth
+      summary: Login
+      description: Kick off the OIDC Authorization Code + PKCE flow.
+      operationId: login_oauth_login_get
+      parameters:
+      - name: return_to
+        in: query
+        required: false
+        schema:
+          type: string
+          default: /
+          title: Return To
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /oauth/callback:
+    get:
+      tags:
+      - oauth
+      summary: Callback
+      description: Handle the OIDC provider's callback, set session, redirect.
+      operationId: callback_oauth_callback_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /oauth/logout:
+    post:
+      tags:
+      - oauth
+      summary: Logout
+      description: Purge session + redirect to LemonLDAP end-session endpoint.
+      operationId: logout_oauth_logout_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /events:
+    get:
+      tags:
+      - events
+      summary: Events
+      operationId: events_events_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+components:
+  schemas:
+    CancelBody:
+      properties:
+        reason:
+          type: string
+          maxLength: 256
+          minLength: 1
+          title: Reason
+      type: object
+      required:
+      - reason
+      title: CancelBody
+    DeclareBody:
+      properties:
+        intent_text:
+          type: string
+          maxLength: 4096
+          minLength: 1
+          title: Intent Text
+      type: object
+      required:
+      - intent_text
+      title: DeclareBody
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    Mission:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        owner_email:
+          type: string
+          title: Owner Email
+        declared_by:
+          type: string
+          title: Declared By
+        declared_at:
+          type: string
+          format: date-time
+          title: Declared At
+        intent_text:
+          type: string
+          title: Intent Text
+        plan:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/PlanStep'
+            type: array
+          - type: 'null'
+          title: Plan
+        state:
+          $ref: '#/components/schemas/MissionState'
+          default: declared
+        state_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: State Reason
+        due_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Due At
+        artifacts:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Artifacts
+        langfuse_session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Langfuse Session Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - owner_email
+      - declared_by
+      - declared_at
+      - intent_text
+      - created_at
+      - updated_at
+      title: Mission
+    MissionState:
+      type: string
+      enum:
+      - declared
+      - planning
+      - running
+      - awaiting_user
+      - done
+      - failed
+      - cancelled
+      title: MissionState
+    PlanStep:
+      properties:
+        agent:
+          type: string
+          title: Agent
+        tool:
+          type: string
+          title: Tool
+        args:
+          additionalProperties: true
+          type: object
+          title: Args
+        status:
+          type: string
+          enum:
+          - pending
+          - in_progress
+          - done
+          - skipped
+          title: Status
+          default: pending
+      additionalProperties: false
+      type: object
+      required:
+      - agent
+      - tool
+      title: PlanStep
+    ResumeBody:
+      properties:
+        user_response:
+          additionalProperties: true
+          type: object
+          title: User Response
+      type: object
+      required:
+      - user_response
+      title: ResumeBody
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
