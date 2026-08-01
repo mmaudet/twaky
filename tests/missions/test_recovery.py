@@ -33,6 +33,23 @@ def _cleanup(mid):
         conn.commit()
 
 
+def test_planning_mission_with_no_checkpoint_is_failed():
+    """A mission stuck in PLANNING (crashed between start_planning and commit_plan)
+    must be transitioned to FAILED by recovery — the state machine must allow it."""
+    m = engine.declare(
+        intent_text="ghost planning", owner_email="a@x", declared_by="a@x"
+    )
+    engine.start_planning(m.id)  # DECLARED → PLANNING
+    # DO NOT commit_plan — leave in PLANNING with no checkpoint
+
+    results = recovery.resume_missions_after_restart(owner_email="a@x")
+    ids = {mid: action for (mid, action) in results}
+    assert ids.get(m.id) == "failed_checkpoint_lost"
+    final = repository.get(m.id)
+    assert final.state == MissionState.FAILED
+    _cleanup(m.id)
+
+
 def test_mission_without_checkpoint_is_failed_at_recovery():
     """Simulate a crash right after commit_plan, before LangGraph wrote a checkpoint."""
     m = engine.declare(intent_text="ghost", owner_email="a@x", declared_by="a@x")

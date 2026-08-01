@@ -47,9 +47,11 @@ async def _publish_mail_received(mid: str, owner: str):
             "timestamp": "2026-08-01T12:00:00Z",
         }
         await exch.publish(
-            aio_pika.Message(body=json.dumps(body).encode(),
-                             content_type="application/json",
-                             message_id=f"test-{mid}"),
+            aio_pika.Message(
+                body=json.dumps(body).encode(),
+                content_type="application/json",
+                message_id=f"test-{mid}",
+            ),
             routing_key="",
         )
 

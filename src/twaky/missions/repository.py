@@ -8,7 +8,7 @@ their own connection/transaction.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -56,11 +56,19 @@ def insert(m: Mission) -> None:
             VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::jsonb, %s, %s, %s)
             """,
             (
-                m.id, m.owner_email, m.declared_by, m.declared_at, m.intent_text,
+                m.id,
+                m.owner_email,
+                m.declared_by,
+                m.declared_at,
+                m.intent_text,
                 json.dumps([s.model_dump() for s in m.plan]) if m.plan else None,
-                m.state.value, m.state_reason, m.due_at,
+                m.state.value,
+                m.state_reason,
+                m.due_at,
                 json.dumps(m.artifacts),
-                m.langfuse_session_id, m.created_at, m.updated_at,
+                m.langfuse_session_id,
+                m.created_at,
+                m.updated_at,
             ),
         )
         conn.commit()
@@ -82,7 +90,7 @@ def update_state(
 ) -> None:
     """Update state + optional plan/artifacts, bump updated_at. One row, one txn."""
     sets = ["state = %s", "state_reason = %s", "updated_at = %s"]
-    params: list[Any] = [new_state.value, reason, datetime.now(tz=_utc())]
+    params: list[Any] = [new_state.value, reason, datetime.now(tz=UTC)]
     if plan is not None:
         sets.append("plan = %s::jsonb")
         params.append(json.dumps([s.model_dump() for s in plan]))
@@ -120,12 +128,11 @@ def select_for_update(cur: Any, mission_id: UUID) -> Mission:
     return _row_to_mission(row)
 
 
-def _utc() -> Any:
-    from datetime import UTC
-
-    return UTC
-
-
 __all__ = [
-    "MissionNotFound", "get", "insert", "list_live", "select_for_update", "update_state",
+    "MissionNotFound",
+    "get",
+    "insert",
+    "list_live",
+    "select_for_update",
+    "update_state",
 ]

@@ -32,9 +32,15 @@ pytestmark = pytest.mark.skipif(not _reachable(), reason="twaky-pg not reachable
 def _make(owner: str = "alice@example.com", intent: str = "test mission") -> Mission:
     now = datetime.now(UTC)
     return Mission(
-        id=uuid4(), owner_email=owner, declared_by=owner,
-        declared_at=now, intent_text=intent, state=MissionState.DECLARED,
-        artifacts=[], created_at=now, updated_at=now,
+        id=uuid4(),
+        owner_email=owner,
+        declared_by=owner,
+        declared_at=now,
+        intent_text=intent,
+        state=MissionState.DECLARED,
+        artifacts=[],
+        created_at=now,
+        updated_at=now,
     )
 
 

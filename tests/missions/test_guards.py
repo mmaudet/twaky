@@ -31,6 +31,12 @@ class TestLegalTransitions:
         for s in (S.DECLARED, S.PLANNING, S.RUNNING, S.AWAITING_USER):
             check_transition(s, S.CANCELLED)
 
+    def test_declared_to_failed_allowed(self):
+        check_transition(S.DECLARED, S.FAILED)  # recovery path
+
+    def test_planning_to_failed_allowed(self):
+        check_transition(S.PLANNING, S.FAILED)  # recovery path
+
 
 class TestIllegalTransitions:
     def test_declared_to_running_forbidden(self):

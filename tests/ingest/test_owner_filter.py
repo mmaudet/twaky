@@ -15,11 +15,19 @@ class TestCalendar:
         assert matches_owner("calendar:event:created", p, OWNER)
 
     def test_owner_is_attendee(self):
-        p = {"uid": "e1", "organizer": {"email": "x@y"}, "attendees": [{"email": OWNER}]}
+        p = {
+            "uid": "e1",
+            "organizer": {"email": "x@y"},
+            "attendees": [{"email": OWNER}],
+        }
         assert matches_owner("calendar:event:updated", p, OWNER)
 
     def test_owner_neither(self):
-        p = {"uid": "e1", "organizer": {"email": "x@y"}, "attendees": [{"email": "z@y"}]}
+        p = {
+            "uid": "e1",
+            "organizer": {"email": "x@y"},
+            "attendees": [{"email": "z@y"}],
+        }
         assert not matches_owner("calendar:event:created", p, OWNER)
 
     def test_owner_with_missing_fields(self):
@@ -85,16 +93,26 @@ class TestIngestWiring:
 
         # Consume ONE message.
         class FakeIter:
-            def __init__(self, items): self.items = list(items)
-            def __aiter__(self): return self
+            def __init__(self, items):
+                self.items = list(items)
+
+            def __aiter__(self):
+                return self
+
             async def __anext__(self):
-                if not self.items: raise StopAsyncIteration
+                if not self.items:
+                    raise StopAsyncIteration
                 return self.items.pop(0)
-            async def __aenter__(self): return self
-            async def __aexit__(self, *a): return None
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return None
 
         class FakeQueue:
-            def iterator(self): return FakeIter([FakeMessage()])
+            def iterator(self):
+                return FakeIter([FakeMessage()])
 
         await ingest._consume(FakeQueue())
 

@@ -18,7 +18,7 @@ ok()   { echo -e "${GREEN}✔${NC} $*"; }
 fail() { echo -e "${RED}✘${NC} $*"; exit 1; }
 
 TWAKY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-DEPLOY="/home/mmaudet/deploy/kickstart-maudet-cloud/docker-compose.yaml"
+DEPLOY="${TWAKY_DIR}/docker-compose.yml"
 RUN="docker compose -f ${DEPLOY} run --rm --no-deps twaky-agent"
 
 # shellcheck disable=SC1091

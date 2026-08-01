@@ -48,7 +48,9 @@ def resume_missions_after_restart(owner_email: str) -> list[tuple[UUID, Action]]
         else:
             log.warning("checkpoint_lost", mission_id=str(m.id))
             engine.finish(
-                m.id, outcome="failed", artifacts=[],
+                m.id,
+                outcome="failed",
+                artifacts=[],
                 reason="checkpoint_lost_after_restart",
             )
             out.append((m.id, "failed_checkpoint_lost"))

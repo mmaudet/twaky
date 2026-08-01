@@ -22,7 +22,8 @@ def _get_pool() -> ConnectionPool:
     if _pool is None:
         _pool = ConnectionPool(
             conninfo=get_langgraph_dsn(),
-            min_size=1, max_size=4,
+            min_size=1,
+            max_size=4,
             kwargs={"autocommit": True, "prepare_threshold": 0},
             open=True,
         )

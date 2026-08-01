@@ -23,7 +23,8 @@ def _reachable() -> bool:
 
 
 pytestmark = pytest.mark.skipif(
-    not _reachable(), reason="twaky-pg not reachable (host must be inside twake-network)"
+    not _reachable(),
+    reason="twaky-pg not reachable (host must be inside twake-network)",
 )
 
 
@@ -35,18 +36,26 @@ def test_mission_table_exists():
         )
         cols = {r[0] for r in cur.fetchall()}
     expected = {
-        "id", "owner_email", "declared_by", "declared_at", "intent_text",
-        "plan", "state", "state_reason", "due_at", "artifacts",
-        "langfuse_session_id", "created_at", "updated_at",
+        "id",
+        "owner_email",
+        "declared_by",
+        "declared_at",
+        "intent_text",
+        "plan",
+        "state",
+        "state_reason",
+        "due_at",
+        "artifacts",
+        "langfuse_session_id",
+        "created_at",
+        "updated_at",
     }
     assert expected.issubset(cols), f"missing columns: {expected - cols}"
 
 
 def test_indexes_exist():
     with psycopg.connect(_dsn()) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT indexname FROM pg_indexes WHERE tablename='mission'"
-        )
+        cur.execute("SELECT indexname FROM pg_indexes WHERE tablename='mission'")
         idx = {r[0] for r in cur.fetchall()}
     assert "mission_live_idx" in idx
     assert "mission_owner_state_idx" in idx

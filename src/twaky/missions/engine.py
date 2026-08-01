@@ -15,6 +15,7 @@ span attached to the mission's stable session_id (assigned at declare time).
 from __future__ import annotations
 
 import contextlib
+import json
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID, uuid4
@@ -110,14 +111,10 @@ def _transition(
         params: list[Any] = [to_state.value, reason, datetime.now(UTC)]
         if plan is not None:
             sets.append("plan = %s::jsonb")
-            import json as _json
-
-            params.append(_json.dumps([s.model_dump() for s in plan]))
+            params.append(json.dumps([s.model_dump() for s in plan]))
         if artifacts is not None:
             sets.append("artifacts = %s::jsonb")
-            import json as _json
-
-            params.append(_json.dumps(artifacts))
+            params.append(json.dumps(artifacts))
         params.append(mission_id)
         cur.execute(f"UPDATE mission SET {', '.join(sets)} WHERE id = %s", params)
         conn.commit()
@@ -168,8 +165,6 @@ def finish(
     reason: str = "",
 ) -> None:
     target = MissionState.DONE if outcome == "done" else MissionState.FAILED
-    import json as _json
-
     with (
         _trace("finish", mission_id, extra={"outcome": outcome}),
         get_pool().connection() as conn,
@@ -182,7 +177,13 @@ def finish(
         cur.execute(
             "UPDATE mission SET state = %s, state_reason = %s, artifacts = %s::jsonb, "
             "updated_at = %s WHERE id = %s",
-            (target.value, reason or None, _json.dumps(merged), datetime.now(UTC), mission_id),
+            (
+                target.value,
+                reason or None,
+                json.dumps(merged),
+                datetime.now(UTC),
+                mission_id,
+            ),
         )
         conn.commit()
     _flush()

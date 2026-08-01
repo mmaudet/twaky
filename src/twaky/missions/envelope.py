@@ -25,10 +25,10 @@ class Envelope(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     envelope_version: str = "1"
-    message_id: str            # urn:uuid:<uuid4>
-    correlation_id: str        # urn:uuid:<uuid4>
-    from_email: str            # sender twaky owner
-    to_email: str              # recipient twaky owner (used as routing key)
+    message_id: str  # urn:uuid:<uuid4>
+    correlation_id: str  # urn:uuid:<uuid4>
+    from_email: str  # sender twaky owner
+    to_email: str  # recipient twaky owner (used as routing key)
     sent_at: datetime
     expires_at: datetime
     intent: Intent

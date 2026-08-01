@@ -10,8 +10,8 @@ from __future__ import annotations
 from twaky.missions.models import MissionState as S
 
 _ALLOWED: dict[S, frozenset[S]] = {
-    S.DECLARED: frozenset({S.PLANNING, S.CANCELLED}),
-    S.PLANNING: frozenset({S.RUNNING, S.CANCELLED}),
+    S.DECLARED: frozenset({S.PLANNING, S.CANCELLED, S.FAILED}),
+    S.PLANNING: frozenset({S.RUNNING, S.CANCELLED, S.FAILED}),
     S.RUNNING: frozenset({S.AWAITING_USER, S.DONE, S.FAILED, S.CANCELLED}),
     S.AWAITING_USER: frozenset({S.RUNNING, S.CANCELLED, S.FAILED}),
     S.DONE: frozenset(),
