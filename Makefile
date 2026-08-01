@@ -1,4 +1,4 @@
-.PHONY: help up down build logs test verify verify-clean backup backup-dry restore scenarios-foundations
+.PHONY: help up down build logs test verify verify-clean backup backup-dry restore scenarios-foundations scenarios-agents
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -43,3 +43,6 @@ restore: ## Restore all stores from DATE=YYYY-MM-DD (use FORCE=1 to skip prompt)
 
 scenarios-foundations: ## Run the Foundations end-to-end scenario
 	bash scripts/scenarios-foundations.sh
+
+scenarios-agents: ## Run the Agents+Atlas end-to-end scenario
+	bash scripts/scenarios-agents.sh
