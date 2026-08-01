@@ -24,6 +24,7 @@ dependencies = [
     "pydantic-settings>=2.7",
     "python-dotenv>=1.0",
     "structlog>=25.1",
+    "trafilatura>=1.12",
     "typer>=0.15",
 ]
 
