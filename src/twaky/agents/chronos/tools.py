@@ -5,6 +5,7 @@ from __future__ import annotations
 from langchain_core.tools import tool
 
 from twaky.db import get_pool
+from twaky.mappers._cypher import cql_literal
 
 _GRAPH = "twake"
 _TAG = "$CQR$"
@@ -28,7 +29,7 @@ def list_events(from_iso: str, to_iso: str) -> list[dict]:
     """
     body = (
         f"MATCH (e:CalendarEvent) "
-        f'WHERE e.start_at >= "{from_iso}" AND e.start_at <= "{to_iso}" '
+        f"WHERE e.start_at >= {cql_literal(from_iso)} AND e.start_at <= {cql_literal(to_iso)} "
         f"AND (e.deleted = false OR e.deleted IS NULL) "
         f"RETURN e.uid AS uid, e.summary AS summary, e.start_at AS start_at, "
         f"e.end_at AS end_at ORDER BY e.start_at"
@@ -54,7 +55,7 @@ def list_events(from_iso: str, to_iso: str) -> list[dict]:
 def get_event(uid: str) -> dict | None:
     """Fetch a single calendar event by uid. Returns None when not found."""
     body = (
-        f'MATCH (e:CalendarEvent {{uid: "{uid}"}}) '
+        f"MATCH (e:CalendarEvent {{uid: {cql_literal(uid)}}}) "
         f"RETURN e.uid AS uid, e.summary AS summary, e.start_at AS start_at, "
         f"e.end_at AS end_at, e.meet_url AS meet_url, e.deleted AS deleted"
     )
@@ -86,8 +87,9 @@ def find_conflicts(person_email: str, from_iso: str, to_iso: str) -> list[dict]:
     as a conflict.
     """
     body = (
-        f'MATCH (p:Person {{email: "{person_email}"}})-[:ATTENDED|:ORGANIZED]->(e:CalendarEvent) '
-        f'WHERE e.start_at >= "{from_iso}" AND e.start_at <= "{to_iso}" '
+        f"MATCH (p:Person {{email: {cql_literal(person_email)}}}) "
+        f"-[:ATTENDED|:ORGANIZED]->(e:CalendarEvent) "
+        f"WHERE e.start_at >= {cql_literal(from_iso)} AND e.start_at <= {cql_literal(to_iso)} "
         f"AND (e.deleted = false OR e.deleted IS NULL) "
         f"RETURN e.uid AS uid, e.summary AS summary, e.start_at AS start_at, e.end_at AS end_at "
         f"ORDER BY e.start_at"

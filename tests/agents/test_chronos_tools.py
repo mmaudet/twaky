@@ -31,6 +31,18 @@ class TestGetEvent:
             out = ct.get_event.invoke({"uid": "nope"})
             assert out is None
 
+    def test_escapes_injection_attempt(self):
+        with patch("twaky.agents.chronos.tools.get_pool") as p:
+            cur = MagicMock()
+            cur.fetchall.return_value = []
+            p.return_value.connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value = cur
+            ct.get_event.invoke({"uid": 'x" OR true //'})
+            sql = cur.execute.call_args_list[-1].args[0]
+            # The dangerous chars must appear only inside a JSON-encoded literal,
+            # not as bare code. The JSON-encoded string will include escaped quotes.
+            # We check that "OR true" appears only escaped/quoted in the JSON.
+            assert '\\"' in sql or "OR true" not in sql.split("$CQR$")[1]
+
 
 class TestFindConflictsInterface:
     def test_takes_person_email_and_window(self):
