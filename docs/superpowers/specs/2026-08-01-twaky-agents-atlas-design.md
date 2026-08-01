@@ -115,20 +115,23 @@ Edges:
 
 ### 4.4 Cooperative user-input seam
 
-When a sub-agent produces a result that needs user validation (typically Plume with a draft), it returns:
+The pattern is **cooperative**: sub-agents never call LangGraph's `interrupt()` themselves. When Plume (or any sub-agent) produces a result that needs user validation, its returned message carries a `pending_user_input` field:
 
 ```json
 {"answer": "...", "pending_user_input": {"kind": "approve_draft", "artifact": {"draft": "…"}}}
 ```
 
-`atlas_router` sees the `pending_user_input` key on the returned message. Instead of routing to the next tool, it calls `engine.request_user_input(mission_id, reason=kind, artifact=artifact)` and terminates the graph via `interrupt` — the daemon takes over: mission → `awaiting_user`, task released from the semaphore.
+The delegate node writes this into `AtlasState.pending_user_input`. On the next iteration, `atlas_router` sees the field, calls `engine.request_user_input(mid, reason=kind, artifact=artifact)` (transitions mission → `awaiting_user`), and routes to `END`. The LangGraph checkpointer saves the final state naturally; the daemon releases the semaphore and moves on.
 
-On `twaky mission resume`, the daemon:
+On `twaky mission resume <mid> --input '<json>'`:
 
-1. Reads the user response from the CLI.
-2. Calls `engine.resume(mid, user_response)` (transitions awaiting_user → running, appends `user_response` artifact — Foundations already does this).
-3. Reloads the checkpoint via `PostgresSaver.get_tuple({"configurable": {"thread_id": str(mid)}})`.
-4. Continues the LangGraph with `Command(resume=user_response)` — `atlas_router` picks up state, sees the response, decides next step (usually `finish_mission("done")`).
+1. The CLI calls `engine.resume(mid, user_response)` (transitions awaiting_user → running, appends a `user_response` artifact — Foundations already does this).
+2. `NOTIFY mission_resumed` wakes the daemon.
+3. Daemon loads the mission via `_run_atlas_state_graph(mid)`; the same `thread_id = str(mid)` config means `PostgresSaver` reloads the last checkpoint into `AtlasState`.
+4. Before invoking `graph.astream`, the daemon appends a `HumanMessage(content=json.dumps(user_response))` to `state.messages` and clears `pending_user_input`.
+5. `atlas_router` picks up, sees the user response, and typically routes to `finish_mission("done")`.
+
+No LangGraph `interrupt()` primitive is used. The seam between Foundations engine state and LangGraph state stays through a plain graph END + fresh invocation.
 
 ## 5. Sub-agents
 
@@ -209,7 +212,7 @@ Plume's LLM decides which tool to call (list → read → draft → return with 
 - `PLUME_OIDC_CLIENT_SECRET=<generated>`
 - `PLUME_OIDC_ISSUER=https://auth.${BASE_DOMAIN}/`
 
-**Fallback for MVP**: if token exchange is not available on the platform, fall back to basic auth with a service account (env `JMAP_USERNAME` / `JMAP_PASSWORD`). Sub-project 2 implements both; the runtime picks whichever env has values.
+**Precedent**: the same token-exchange pattern is already used between Twake Visio and the Calendar service on this platform. `src/twaky/auth/jmap.py` mirrors that flow — endpoints, grant strings, and cache TTL are aligned with what LemonLDAP-NG expects. If the exchange endpoint is unreachable at runtime, Plume tools fail fast with a clear error; there is no basic-auth fallback in sub-project 2.
 
 ## 7. Daemon (`twaky-atlas`)
 
