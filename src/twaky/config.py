@@ -56,6 +56,39 @@ class Settings(BaseSettings):
     langfuse_secret_key: str | None = Field(default=None)
     langfuse_public_url: str | None = Field(default=None)
 
+    # --- Sub-agent LLMs (each falls back to `model` if unset) ---
+    atlas_model: str | None = Field(default=None)
+    chronos_model: str | None = Field(default=None)
+    plume_model: str | None = Field(default=None)
+    iris_model: str | None = Field(default=None)
+
+    # --- Atlas daemon limits ---
+    atlas_max_concurrent_missions: int = Field(
+        default=4,
+        alias="twaky_atlas_max_concurrent_missions",
+    )
+    atlas_max_steps: int = Field(
+        default=12,
+        alias="twaky_atlas_max_steps",
+    )
+    atlas_mission_timeout_s: int = Field(
+        default=300,
+        alias="twaky_atlas_mission_timeout_s",
+    )
+    atlas_max_tokens: int = Field(
+        default=100_000,
+        alias="twaky_atlas_max_tokens",
+    )
+
+    # --- External services ---
+    jmap_endpoint: str = Field(default="http://tmail-backend:8080/jmap")
+    searxng_endpoint: str = Field(default="http://searxng:8080")
+
+    # --- Plume OIDC token exchange (Twake Visio ↔ Calendar pattern) ---
+    plume_oidc_client_id: str = Field(default="")
+    plume_oidc_client_secret: str = Field(default="")
+    plume_oidc_issuer: str = Field(default="")
+
     @property
     def exchanges(self) -> list[str]:
         return [x.strip() for x in self.agent_exchanges.split(",") if x.strip()]
