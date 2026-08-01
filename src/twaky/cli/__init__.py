@@ -63,7 +63,3 @@ def env() -> None:
             d[k] = "***"
     for k in sorted(d):
         typer.echo(f"{k}={d[k]}")
-
-
-if __name__ == "__main__":
-    app()
