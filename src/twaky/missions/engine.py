@@ -8,20 +8,58 @@ outside this file MUST NOT write to the row directly. The engine:
 3. Applies the update (state, state_reason, plan, artifacts, updated_at).
 4. Commits.
 
-Langfuse trace emission is added in a later task (test-driven; keep this
-task focused on the state machine + persistence).
+Langfuse trace emission: every transition emits a ``mission.<transition>``
+span attached to the mission's stable session_id (assigned at declare time).
 """
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
+from twaky import observability
 from twaky.db import get_pool
 from twaky.missions import repository
 from twaky.missions.guards import check_transition
 from twaky.missions.models import Mission, MissionState, PlanStep
+
+
+def _trace(name: str, mission_id: UUID, extra: dict[str, Any] | None = None) -> Any:
+    """Emit a ``mission.<name>`` trace attached to the mission's session_id.
+
+    No-op if Langfuse is not configured — observability.get_client() returns
+    None and this helper silently returns a nullcontext.
+    """
+    lf = observability.get_client()
+    if lf is None:
+        return contextlib.nullcontext()
+    m = repository.get(mission_id)
+    session_id = (m.langfuse_session_id if m else None) or f"mission-{mission_id}"
+    span = lf.start_as_current_span(name=f"mission.{name}")
+    # Best-effort: set trace-level session_id (matches what agent.ask does).
+    try:
+        span.update_trace(session_id=session_id, user_id=(m.owner_email if m else ""))
+    except Exception:  # noqa: BLE001, S110
+        pass
+    if extra:
+        try:
+            span.update(input=extra)
+        except Exception:  # noqa: BLE001, S110
+            pass
+    return span
+
+
+def _flush() -> None:
+    """Best-effort flush so short-lived CLI processes don't lose traces."""
+    lf = observability.get_client()
+    if lf is None:
+        return
+    try:
+        lf.flush()
+    except Exception:  # noqa: BLE001, S110
+        pass
 
 
 def declare(
@@ -41,10 +79,14 @@ def declare(
         state=MissionState.DECLARED,
         due_at=due_at,
         artifacts=[],
+        langfuse_session_id=f"mission-{uuid4()}",  # stable session id from birth
         created_at=now,
         updated_at=now,
     )
     repository.insert(m)
+    with _trace("declare", m.id, extra={"intent_text": intent_text}):
+        pass
+    _flush()
     return m
 
 
@@ -82,33 +124,41 @@ def _transition(
 
 
 def start_planning(mission_id: UUID) -> None:
-    _transition(mission_id, MissionState.PLANNING)
+    with _trace("start_planning", mission_id):
+        _transition(mission_id, MissionState.PLANNING)
+    _flush()
 
 
 def commit_plan(mission_id: UUID, plan: list[PlanStep]) -> None:
-    _transition(mission_id, MissionState.RUNNING, plan=plan)
+    with _trace("commit_plan", mission_id):
+        _transition(mission_id, MissionState.RUNNING, plan=plan)
+    _flush()
 
 
 def request_user_input(mission_id: UUID, reason: str, artifact: dict[str, Any]) -> None:
-    _transition(
-        mission_id,
-        MissionState.AWAITING_USER,
-        reason=reason,
-        append_artifact=artifact,
-    )
+    with _trace("request_user_input", mission_id, extra={"reason": reason}):
+        _transition(
+            mission_id,
+            MissionState.AWAITING_USER,
+            reason=reason,
+            append_artifact=artifact,
+        )
+    _flush()
 
 
 def resume(mission_id: UUID, user_response: dict[str, Any]) -> None:
-    _transition(
-        mission_id,
-        MissionState.RUNNING,
-        reason="user_response_received",
-        append_artifact={
-            "kind": "user_response",
-            "at": datetime.now(UTC).isoformat(),
-            "payload": user_response,
-        },
-    )
+    with _trace("resume", mission_id):
+        _transition(
+            mission_id,
+            MissionState.RUNNING,
+            reason="user_response_received",
+            append_artifact={
+                "kind": "user_response",
+                "at": datetime.now(UTC).isoformat(),
+                "payload": user_response,
+            },
+        )
+    _flush()
 
 
 def finish(
@@ -118,23 +168,30 @@ def finish(
     reason: str = "",
 ) -> None:
     target = MissionState.DONE if outcome == "done" else MissionState.FAILED
-    # Append the final artifacts to the existing list (don't clobber).
-    with get_pool().connection() as conn, conn.cursor() as cur:
+    import json as _json
+
+    with (
+        _trace("finish", mission_id, extra={"outcome": outcome}),
+        get_pool().connection() as conn,
+        conn.cursor() as cur,
+    ):
+        # Append the final artifacts to the existing list (don't clobber).
         current = repository.select_for_update(cur, mission_id)
         check_transition(current.state, target)
         merged = list(current.artifacts) + list(artifacts)
-        import json as _json
-
         cur.execute(
             "UPDATE mission SET state = %s, state_reason = %s, artifacts = %s::jsonb, "
             "updated_at = %s WHERE id = %s",
             (target.value, reason or None, _json.dumps(merged), datetime.now(UTC), mission_id),
         )
         conn.commit()
+    _flush()
 
 
 def cancel(mission_id: UUID, reason: str) -> None:
-    _transition(mission_id, MissionState.CANCELLED, reason=reason)
+    with _trace("cancel", mission_id, extra={"reason": reason}):
+        _transition(mission_id, MissionState.CANCELLED, reason=reason)
+    _flush()
 
 
 __all__ = [

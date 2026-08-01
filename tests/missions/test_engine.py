@@ -90,3 +90,36 @@ def test_cancel_from_any_non_terminal():
     assert got.state == MissionState.CANCELLED
     assert got.state_reason == "user_aborted"
     _cleanup(m.id)
+
+
+class TestLangfuseInstrumentation:
+    def test_declare_emits_trace(self, monkeypatch):
+        """When langfuse creds are set, engine.declare should call the client."""
+        # Skip if not configured — we don't want CI to require creds.
+        if not (settings.langfuse_public_key and settings.langfuse_secret_key):
+            pytest.skip("langfuse not configured in this environment")
+
+        seen: list[str] = []
+
+        # Wrap the real Langfuse client to record start_as_current_span names.
+        import twaky.observability as obs
+
+        real_client = obs.get_client()
+        if real_client is None:
+            pytest.skip("langfuse client unavailable")
+
+        orig_span = real_client.start_as_current_span
+
+        def _spy(name, **kw):
+            seen.append(name)
+            return orig_span(name=name, **kw)
+
+        monkeypatch.setattr(real_client, "start_as_current_span", _spy)
+
+        m = engine.declare(intent_text="X", owner_email="a@x", declared_by="a@x")
+        engine.start_planning(m.id)
+        engine.cancel(m.id, reason="test_over")
+        assert any(n.startswith("mission.declare") for n in seen)
+        assert any(n.startswith("mission.start_planning") for n in seen)
+        assert any(n.startswith("mission.cancel") for n in seen)
+        _cleanup(m.id)
