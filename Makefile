@@ -1,4 +1,4 @@
-.PHONY: help up down build logs test verify verify-clean
+.PHONY: help up down build logs test verify verify-clean backup backup-dry restore
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -30,3 +30,13 @@ verify-clean: ## Wipe volumes and re-run verify from scratch
 	$(MAKE) up
 	sleep 20
 	$(MAKE) verify
+
+backup: ## Dump PG + ClickHouse + SeaweedFS to /home/mmaudet/backups/twaky/<date>/
+	@bash scripts/backup.sh
+
+backup-dry: ## Show what backup would do (no side effects)
+	@bash scripts/backup.sh --dry-run
+
+restore: ## Restore all stores from DATE=YYYY-MM-DD (use FORCE=1 to skip prompt)
+	@if [ -z "$(DATE)" ]; then echo "usage: make restore DATE=YYYY-MM-DD"; exit 2; fi
+	@bash scripts/restore.sh $(DATE)

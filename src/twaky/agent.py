@@ -23,7 +23,6 @@ from twaky import observability
 from twaky.config import settings
 from twaky.graph import get_graph
 
-
 # AGEGraph.query() derives result column names from tokens after RETURN.
 # For expressions like `p.email` the derived name is `p.email`, which
 # breaks the AS clause it appends. Force the LLM to alias every RETURN
@@ -115,7 +114,7 @@ def ask(question: str) -> AgentAnswer:
         # Ensure the trace is flushed before we exit (CLI process may end fast).
         try:
             lf.flush()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110
             pass
         if trace_id:
             try:
@@ -125,7 +124,7 @@ def ask(question: str) -> AgentAnswer:
                     value=1 if result.get("intermediate_steps") else 0,
                 )
                 lf.flush()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110
                 pass
     else:
         result = _invoke()
@@ -154,8 +153,8 @@ try:
     def ask_graph(question: str) -> str:
         """Ask the Twake knowledge graph a natural-language question and return the answer."""
         return ask(question).answer
-except Exception:  # pragma: no cover - langchain_core always present in prod
+except Exception:  # noqa: BLE001  # pragma: no cover - langchain_core always present in prod
     ask_graph = None  # type: ignore[assignment]
 
 
-__all__ = ["ask", "AgentAnswer", "ask_graph"]
+__all__ = ["AgentAnswer", "ask", "ask_graph"]

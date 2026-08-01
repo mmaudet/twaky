@@ -8,7 +8,6 @@ same event twice does NOT duplicate nodes/relationships.
 from __future__ import annotations
 
 import os
-import time
 import uuid
 
 import psycopg
@@ -27,7 +26,7 @@ def _reachable() -> bool:
     try:
         with psycopg.connect(_dsn(), connect_timeout=1) as _:
             return True
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -69,31 +68,30 @@ def test_projector_idempotence_over_cycle():
     }
     stmts = map_event(payload)
 
-    with psycopg.connect(_dsn()) as conn:
-        with conn.cursor() as cur:
-            cur.execute("LOAD 'age';")
-            cur.execute('SET search_path = ag_catalog, "$user", public;')
+    with psycopg.connect(_dsn()) as conn, conn.cursor() as cur:
+        cur.execute("LOAD 'age';")
+        cur.execute('SET search_path = ag_catalog, "$user", public;')
 
-            # Baseline node count.
-            before_events = _count(cur, "CalendarEvent")
+        # Baseline node count.
+        _count(cur, "CalendarEvent")
 
-            # Project twice.
-            _execute_cypher(cur, stmts)
-            _execute_cypher(cur, stmts)
-            conn.commit()
+        # Project twice.
+        _execute_cypher(cur, stmts)
+        _execute_cypher(cur, stmts)
+        conn.commit()
 
-            # Exactly ONE new CalendarEvent with our uid.
-            rows = _cypher(
-                cur,
-                f'MATCH (e:CalendarEvent {{uid: "{uid}"}}) RETURN count(e) AS n',
-                alias="n agtype",
-            )
-            assert int(str(rows[0][0]).strip('"')) == 1
+        # Exactly ONE new CalendarEvent with our uid.
+        rows = _cypher(
+            cur,
+            f'MATCH (e:CalendarEvent {{uid: "{uid}"}}) RETURN count(e) AS n',
+            alias="n agtype",
+        )
+        assert int(str(rows[0][0]).strip('"')) == 1
 
-            # Cleanup — MATCH DELETE.
-            _cypher(
-                cur,
-                f'MATCH (e:CalendarEvent {{uid: "{uid}"}}) DETACH DELETE e',
-                alias="v agtype",
-            )
-            conn.commit()
+        # Cleanup — MATCH DELETE.
+        _cypher(
+            cur,
+            f'MATCH (e:CalendarEvent {{uid: "{uid}"}}) DETACH DELETE e',
+            alias="v agtype",
+        )
+        conn.commit()

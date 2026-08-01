@@ -120,6 +120,29 @@ uv run pytest -q
 # The `twaky ask` output prints a Langfuse trace URL — open it in the browser.
 ```
 
+## Backups
+
+Langfuse v3 keeps state in three independent stores (Postgres, ClickHouse,
+SeaweedFS S3). `scripts/backup.sh` dumps all three (plus the twaky graph DB)
+into `/home/mmaudet/backups/twaky/YYYY-MM-DD/` and prunes anything older than
+14 days. `scripts/restore.sh <DATE>` puts them back.
+
+```bash
+make backup                        # one-shot backup of all stores
+make backup-dry                    # show what backup.sh would do
+make restore DATE=2026-08-01       # restore all three stores from that date
+```
+
+Recommended cron (root, or any user in the `docker` group):
+
+```
+0 3 * * * /home/mmaudet/work/twaky/scripts/backup.sh >> /var/log/twaky-backup.log 2>&1
+```
+
+Full documentation — output layout, restore procedure, systemd-timer
+alternative, disk usage estimates, troubleshooting — is in
+[`scripts/backup.md`](scripts/backup.md).
+
 ## Security
 
 - No secrets in git (`.env` is in `.gitignore`, only `.env.example` is committed).

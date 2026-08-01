@@ -6,8 +6,6 @@ we catch regressions in mapper output shape.
 
 from __future__ import annotations
 
-import pytest
-
 from twaky.mappers import get_mapper
 from twaky.mappers._cypher import cql_literal, props
 

@@ -32,7 +32,9 @@ def project(
 
 @app.command()
 def replay(
-    from_id: int = typer.Option(1, "--from", help="Restart projection from this event_log id."),
+    from_id: int = typer.Option(
+        1, "--from", help="Restart projection from this event_log id."
+    ),
 ) -> None:
     """Mark events as pending again so the projector re-runs them."""
     from twaky.projector import replay_from

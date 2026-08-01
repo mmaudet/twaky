@@ -13,7 +13,6 @@ Otherwise:
 
 from __future__ import annotations
 
-import logging
 import os
 from typing import Any
 
@@ -46,6 +45,7 @@ def configure() -> None:
 
     try:
         import litellm
+
         cbs = list(getattr(litellm, "callbacks", None) or [])
         if "langfuse" not in cbs:
             cbs.append("langfuse")
@@ -62,6 +62,7 @@ def get_client() -> Any | None:
         return None
     try:
         from langfuse import get_client  # v3
+
         return get_client()
     except Exception as e:  # noqa: BLE001
         log.warning("langfuse client unavailable", err=str(e))
@@ -73,6 +74,7 @@ def get_langchain_callback() -> Any | None:
         return None
     try:
         from langfuse.langchain import CallbackHandler
+
         return CallbackHandler()
     except Exception as e:  # noqa: BLE001
         log.warning("langfuse CallbackHandler unavailable", err=str(e))
@@ -82,7 +84,8 @@ def get_langchain_callback() -> Any | None:
 def public_trace_url(trace_id: str) -> str:
     base = settings.langfuse_public_url or settings.langfuse_host or ""
     project = os.environ.get(
-        "LANGFUSE_INIT_PROJECT_ID", settings.langfuse_public_key and "twaky-project" or ""
+        "LANGFUSE_INIT_PROJECT_ID",
+        settings.langfuse_public_key and "twaky-project" or "",
     )
     if not base:
         return ""

@@ -20,7 +20,7 @@ from typing import Any
 import aio_pika
 import psycopg
 import structlog
-from aio_pika import ExchangeType, Message
+from aio_pika import ExchangeType
 
 from twaky.config import settings
 from twaky.db import get_pool
@@ -58,7 +58,9 @@ def _decode_payload(body: bytes) -> dict[str, Any]:
         return {"_raw": body.decode("utf-8", errors="replace")}
 
 
-def _insert_event(exchange: str, routing_key: str, message_id: str, payload: dict[str, Any]) -> bool:
+def _insert_event(
+    exchange: str, routing_key: str, message_id: str, payload: dict[str, Any]
+) -> bool:
     """Insert into event_log. Returns True if inserted, False if dedup skipped."""
     with get_pool().connection() as conn:
         with conn.cursor() as cur:
@@ -76,7 +78,9 @@ def _insert_event(exchange: str, routing_key: str, message_id: str, payload: dic
     return row is not None
 
 
-async def _bind_and_consume(channel: aio_pika.abc.AbstractChannel) -> aio_pika.abc.AbstractQueue:
+async def _bind_and_consume(
+    channel: aio_pika.abc.AbstractChannel,
+) -> aio_pika.abc.AbstractQueue:
     # Dead-letter side first (main queue points at DLX).
     dlx_name = settings.agent_queue + DLX_SUFFIX
     dlq_name = settings.agent_queue + DLQ_SUFFIX
@@ -118,7 +122,7 @@ async def _consume(queue: aio_pika.abc.AbstractQueue) -> None:
             except psycopg.Error as e:
                 log.error("db error, rejecting to DLQ", err=str(e))
                 await message.reject(requeue=False)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 log.exception("unexpected error, rejecting to DLQ", err=str(e))
                 await message.reject(requeue=False)
 

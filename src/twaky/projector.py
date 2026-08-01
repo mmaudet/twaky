@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import signal
 import time
-from typing import Iterable
+from collections.abc import Iterable
 
 import structlog
 
@@ -106,7 +106,7 @@ def _process_row(row_id: int, exchange: str, payload: dict) -> tuple[bool, str |
                 )
             conn.commit()
         return True, None
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         msg = f"{type(e).__name__}: {e}"
         log.exception("mapper/AGE failure", row_id=row_id, exchange=exchange)
         with get_pool().connection() as conn:
@@ -129,7 +129,7 @@ def run(batch_size: int = 50, once: bool = False) -> None:
     )
     stop = False
 
-    def _handle(sig, frame):  # noqa: ARG001
+    def _handle(sig, frame):
         nonlocal stop
         stop = True
         log.info("shutdown requested", sig=sig)
@@ -175,4 +175,4 @@ def replay_from(from_id: int) -> int:
     return n
 
 
-__all__ = ["run", "replay_from"]
+__all__ = ["replay_from", "run"]

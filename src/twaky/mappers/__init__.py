@@ -7,7 +7,7 @@ json.dumps'd — no external input beyond the trusted payload).
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from twaky.mappers import calendar_event_created, sabre_contact_created
 
@@ -23,4 +23,4 @@ def get_mapper(exchange: str) -> Mapper | None:
     return _REGISTRY.get(exchange)
 
 
-__all__ = ["get_mapper", "Mapper"]
+__all__ = ["Mapper", "get_mapper"]

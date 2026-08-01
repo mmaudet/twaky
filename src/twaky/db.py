@@ -6,8 +6,8 @@ the psycopg pool to run these on connection checkout.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 import psycopg
 from psycopg_pool import ConnectionPool

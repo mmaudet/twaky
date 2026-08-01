@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import aio_pika
 import structlog
@@ -23,7 +23,7 @@ def _synthetic_calendar_event(uid: str) -> dict:
     return {
         "uid": uid,
         "summary": f"Twaky verify event — {uid}",
-        "start": datetime(2026, 8, 1, 14, 0, tzinfo=timezone.utc).isoformat(),
+        "start": datetime(2026, 8, 1, 14, 0, tzinfo=UTC).isoformat(),
         "organizer": {"email": "alice@twake-dev.maudet.cloud", "cn": "Alice"},
         "attendees": [
             {"email": "bob@twake-dev.maudet.cloud", "cn": "Bob"},
