@@ -197,6 +197,15 @@ services:
       LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
       LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
       LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      # --- SSO via LemonLDAP-NG OIDC (twake_auth) ---
+      AUTH_CUSTOM_NAME: ${AUTH_CUSTOM_NAME:-LemonLDAP}
+      AUTH_CUSTOM_CLIENT_ID: ${AUTH_CUSTOM_CLIENT_ID:-}
+      AUTH_CUSTOM_CLIENT_SECRET: ${AUTH_CUSTOM_CLIENT_SECRET:-}
+      AUTH_CUSTOM_ISSUER: ${AUTH_CUSTOM_ISSUER:-}
+      AUTH_CUSTOM_SCOPE: ${AUTH_CUSTOM_SCOPE:-openid email profile}
+      AUTH_CUSTOM_CLIENT_AUTH_METHOD: ${AUTH_CUSTOM_CLIENT_AUTH_METHOD:-client_secret_basic}
+      AUTH_CUSTOM_ID_TOKEN: ${AUTH_CUSTOM_ID_TOKEN:-true}
+      AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING: ${AUTH_CUSTOM_ALLOW_ACCOUNT_LINKING:-true}
     healthcheck:
       # Langfuse Next.js binds to the container's own IP, not 127.0.0.1.
       test: ["CMD-SHELL", "wget -q --spider http://$$HOSTNAME:3000/api/public/health || exit 1"]
