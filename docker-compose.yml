@@ -253,6 +253,12 @@ services:
       MB_JETTY_HOST: 0.0.0.0
       MB_ANON_TRACKING_ENABLED: "false"
       MB_CHECK_FOR_UPDATES: "false"
+      MB_PLUGINS_DIR: /plugins
+    volumes:
+      # ClickHouse driver JAR (community, from clickhouse/metabase-clickhouse-driver)
+      # is not bundled by default; download it locally via
+      # `scripts/install-metabase-drivers.sh` before first boot.
+      - ./metabase/plugins:/plugins
     healthcheck:
       # Metabase binds 0.0.0.0:3000; /api/health returns {"status":"ok"} when ready.
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
