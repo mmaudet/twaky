@@ -2648,6 +2648,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aio-pika" },
+    { name = "httpx" },
     { name = "langchain" },
     { name = "langchain-community" },
     { name = "langchain-core" },
@@ -2676,6 +2677,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aio-pika", specifier = ">=9.5" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "langchain", specifier = ">=1.0" },
     { name = "langchain-community", specifier = ">=0.3" },
     { name = "langchain-core", specifier = ">=0.3" },
