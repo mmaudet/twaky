@@ -110,7 +110,7 @@ Rules:
 
 ### 4.3 Grain
 
-A mission is declared by natural-language intent (`intent_text`). Atlas, at the `planning` transition, produces a `plan` (list of `{agent, tool, args}` steps). The plan is runtime-editable: Atlas may append or reorder steps while `state='running'`. The UI (sub-project 3) shows the current plan and updates as it evolves.
+A mission is declared by natural-language intent (`intent_text`). Atlas, at the `planning` transition, produces a `plan` (list of `{agent, tool, args, status: 'pending'|'in_progress'|'done'|'skipped'}` steps). The plan is runtime-editable while `state='running'`: Atlas rewrites the whole `plan` array in place (single JSONB update, no partial patching) — this keeps the read path simple (UI + API just consume the current value). Each rewrite bumps `updated_at`. The UI (sub-project 3) shows the current plan and updates as it evolves.
 
 ## 5. Owner scoping
 
@@ -208,7 +208,7 @@ Each function:
 2. Call `guards.check_transition(current_state, target_state)` — raises `InvalidTransition` on illegal move.
 3. Update the row (state, state_reason, updated_at, optionally artifacts/plan).
 4. Emit the corresponding LangGraph side effect (`saver.put`, `graph.astream`, `interrupt`, `resume`) when applicable.
-5. Emit a Langfuse span (`mission.<transition>`) as child of the mission's `langfuse_session_id`.
+5. Emit a Langfuse trace named `mission.<transition>` (e.g. `mission.commit_plan`) attached to the mission's `langfuse_session_id`. One trace per transition — Langfuse's Sessions view groups every transition of a mission chronologically. LLM calls made by Atlas/agents inside `running` produce their own traces under the same session.
 
 Atlas (sub-project 2) is required to go through these functions — never touch the `mission` table directly.
 
