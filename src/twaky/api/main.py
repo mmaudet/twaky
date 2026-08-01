@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
+from twaky.api.errors import register_exception_handlers
 from twaky.api.routers import health
 from twaky.api.session import SESSION_COOKIE_NAME
 from twaky.config import settings
@@ -41,6 +42,8 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+
+register_exception_handlers(app)
 
 
 __all__ = ["app"]
