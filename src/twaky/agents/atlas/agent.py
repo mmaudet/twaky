@@ -36,7 +36,13 @@ def _atlas_node(state: AtlasState):
         messages = [SystemMessage(content=_SYSTEM), *messages]
     ai = llm.invoke(messages)
     step_count = state.get("step_count", 0) + 1
-    return {"messages": [ai], "step_count": step_count}
+    # Accumulate token usage when the provider supplies usage_metadata.
+    call_tokens: int = 0
+    usage = getattr(ai, "usage_metadata", None)
+    if isinstance(usage, dict):
+        call_tokens = usage.get("total_tokens", 0) or 0
+    total_tokens = state.get("total_tokens", 0) + call_tokens
+    return {"messages": [ai], "step_count": step_count, "total_tokens": total_tokens}
 
 
 def _route(state: AtlasState):

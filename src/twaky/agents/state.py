@@ -17,6 +17,7 @@ class AtlasState(TypedDict, total=False):
     artifacts: list[dict]
     step_count: int
     pending_user_input: dict | None
+    total_tokens: int  # accumulated token usage across all LLM calls in this mission
 
 
 class AgentState(TypedDict, total=False):
