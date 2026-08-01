@@ -21,4 +21,9 @@ def health() -> None:
     sys.exit(1)
 
 
-# `atlas run` is added in Task 18.
+@app.command()
+def run() -> None:
+    """Run the Atlas orchestrator daemon (foreground)."""
+    from twaky.daemon.atlas_daemon import run as _run
+
+    _run()
