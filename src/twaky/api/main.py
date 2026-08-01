@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
 from twaky.api.errors import register_exception_handlers
-from twaky.api.routers import health, me, oauth
+from twaky.api.routers import health, me, missions, oauth
 from twaky.api.session import SESSION_COOKIE_NAME
 from twaky.config import settings
 
@@ -43,6 +43,7 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(me.router)
+app.include_router(missions.router)
 app.include_router(oauth.router)
 
 register_exception_handlers(app)
