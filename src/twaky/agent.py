@@ -33,12 +33,38 @@ CYPHER_PROMPT = PromptTemplate.from_template(
 Schema of the graph:
 {schema}
 
-Rules:
+Domain conventions — READ BEFORE WRITING THE QUERY:
+- Natural identifiers:
+    * CalendarEvent → **uid** (slug like "sprint-retro"). When the user names
+      an event ("the sprint-retro event", "event X"), match `{{uid: "X"}}` —
+      NEVER match on `summary` (summary is the free-text title).
+    * Person → **email**. `fn` is the display name.
+- Relationship directions (always from Person to CalendarEvent):
+    * `(:Person)-[:ORGANIZED]->(:CalendarEvent)` — organizer
+    * `(:Person)-[:ATTENDED]->(:CalendarEvent)` — attendee (has status prop)
+    * `(:Person)-[:WORKS_AT]->(:Organization)`
+- ATTENDED.status is a lowercased string: "accepted", "declined", "tentative",
+  "unknown", or something else. Use lower-case in the WHERE.
+- `deleted` on CalendarEvent/Person is BOOLEAN. Filter `WHERE e.deleted = false`
+  if the user wants live events only; include tombstones by default otherwise.
+
+Query rules:
 - Only generate a query — no prose, no code fences, no trailing semicolon.
 - MATCH-only. Never generate CREATE, MERGE, DELETE, DROP, SET, REMOVE.
 - **Every RETURN expression MUST be aliased with `AS <plain_identifier>`.**
   Example: `RETURN p.email AS email, p.fn AS fn` — NEVER `RETURN p.email, p.fn`.
-- Prefer natural-key matches (email for Person, uid for CalendarEvent).
+
+Examples:
+- Q: How many events?  → `MATCH (e:CalendarEvent) RETURN count(e) AS n`
+- Q: Who attended sprint-retro?
+  → `MATCH (p:Person)-[:ATTENDED]->(e:CalendarEvent {{uid: "sprint-retro"}})
+     RETURN p.email AS email, p.fn AS fn`
+- Q: What is the visio URL for release-deploy?
+  → `MATCH (e:CalendarEvent {{uid: "release-deploy"}})
+     RETURN e.meet_url AS visio_url`
+- Q: Who declined the design-review?
+  → `MATCH (p:Person)-[r:ATTENDED]->(e:CalendarEvent {{uid: "design-review"}})
+     WHERE r.status = "declined" RETURN p.email AS email`
 
 Question: {question}
 
@@ -87,7 +113,18 @@ def _build_chain() -> GraphCypherQAChain:
     )
 
 
-def ask(question: str) -> AgentAnswer:
+def ask(
+    question: str,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    tags: list[str] | None = None,
+) -> AgentAnswer:
+    """Ask the graph a natural-language question, tracing to Langfuse.
+
+    session_id  → groups related asks in the Langfuse Sessions view.
+    user_id     → attributes traces to a user (Users tab).
+    tags        → free-form labels for filtering.
+    """
     observability.configure()
 
     chain = _build_chain()
@@ -108,6 +145,16 @@ def ask(question: str) -> AgentAnswer:
     if lf is not None:
         with lf.start_as_current_span(name="twaky.ask") as span:
             span.update(input={"question": question})
+            # Trace-level attrs (session/user/tags) group traces in the UI.
+            trace_kwargs: dict[str, Any] = {}
+            if session_id:
+                trace_kwargs["session_id"] = session_id
+            if user_id:
+                trace_kwargs["user_id"] = user_id
+            if tags:
+                trace_kwargs["tags"] = tags
+            if trace_kwargs:
+                span.update_trace(**trace_kwargs)
             result = _invoke()
             trace_id = lf.get_current_trace_id()
             span.update(output={"answer": result.get("result")})
@@ -118,10 +165,17 @@ def ask(question: str) -> AgentAnswer:
             pass
         if trace_id:
             try:
+                # `cypher_generated=1` when the LLM produced a Cypher query,
+                # `answer_nonempty=1` when the final answer has content.
                 lf.create_score(
                     trace_id=trace_id,
                     name="cypher_generated",
                     value=1 if result.get("intermediate_steps") else 0,
+                )
+                lf.create_score(
+                    trace_id=trace_id,
+                    name="answer_nonempty",
+                    value=1 if (result.get("result") or "").strip() else 0,
                 )
                 lf.flush()
             except Exception:  # noqa: BLE001, S110

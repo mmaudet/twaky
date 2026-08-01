@@ -3,12 +3,19 @@
 If LANGFUSE_HOST + keys are absent, everything is a no-op.
 
 Otherwise:
-- `litellm.callbacks = ["langfuse"]` sends every LLM call to Langfuse.
+- `langfuse.langchain.CallbackHandler()` — attached to LangChain runs
+  via `chain.invoke(config={"callbacks": [handler]})`. Produces the
+  GENERATION observation with model + tokens.
 - A `Langfuse` client is exposed via `get_client()`. Wrap agentic
   invocations in `with client.start_as_current_span(name=...) as span`
   and use `client.get_current_trace_id()` after — that ID matches the
   one the LangChain handler used, so a single trace groups the whole
   invocation.
+
+Note: LiteLLM's native Langfuse callback (v1.94 → langfuse v2 API) is
+incompatible with our langfuse v3 client (`sdk_integration` kwarg was
+removed). We do NOT enable it — the LangChain callback alone gives
+identical coverage (GENERATION per LLM call, tokens, model, cost).
 """
 
 from __future__ import annotations
@@ -34,7 +41,7 @@ def _langfuse_enabled() -> bool:
 
 
 def configure() -> None:
-    """Install the Langfuse callback into LiteLLM once per process."""
+    """Populate Langfuse env vars once per process for the SDK to pick up."""
     global _configured
     if _configured or not _langfuse_enabled():
         return
@@ -42,18 +49,7 @@ def configure() -> None:
     os.environ["LANGFUSE_PUBLIC_KEY"] = settings.langfuse_public_key or ""
     os.environ["LANGFUSE_SECRET_KEY"] = settings.langfuse_secret_key or ""
     os.environ["LANGFUSE_HOST"] = settings.langfuse_host or ""
-
-    try:
-        import litellm
-
-        cbs = list(getattr(litellm, "callbacks", None) or [])
-        if "langfuse" not in cbs:
-            cbs.append("langfuse")
-        litellm.callbacks = cbs  # type: ignore[attr-defined]
-        log.info("litellm langfuse callback installed", host=settings.langfuse_host)
-    except Exception as e:  # noqa: BLE001
-        log.warning("could not configure litellm callback", err=str(e))
-
+    log.info("langfuse env configured", host=settings.langfuse_host)
     _configured = True
 
 

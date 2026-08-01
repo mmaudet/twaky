@@ -44,11 +44,18 @@ def replay(
 
 
 @app.command()
-def ask(question: str) -> None:
+def ask(
+    question: str,
+    session: str = typer.Option(
+        None, help="Langfuse session_id to group related asks."
+    ),
+    user: str = typer.Option(None, help="Langfuse user_id (Users tab)."),
+    tag: list[str] = typer.Option(None, help="Langfuse tag (repeatable)."),  # noqa: B008
+) -> None:
     """Ask the graph a natural-language question via the LangChain chain."""
     from twaky.agent import ask as _ask
 
-    result = _ask(question)
+    result = _ask(question, session_id=session, user_id=user, tags=tag or None)
     typer.echo(result)
 
 
@@ -77,13 +84,10 @@ def demo(
         help="Question to ask the agent after publish (default: about the visio URL).",
     ),
     wait_s: int = typer.Option(3, help="Seconds to wait for projection before asking."),
+    session: str = typer.Option(None, help="Langfuse session_id for grouping."),
+    user: str = typer.Option(None, help="Langfuse user_id."),
 ) -> None:
-    """End-to-end demo: publish a visio meeting event, then ask the graph agent.
-
-    Publishes a rich calendar:event:created payload with a Meet URL, waits for
-    the projector to write it into AGE, then invokes the QA chain and prints
-    the Cypher generated + answer + Langfuse trace URL.
-    """
+    """End-to-end demo: publish a visio meeting event, then ask the graph agent."""
     import time
     import uuid as _uuid
 
@@ -101,7 +105,7 @@ def demo(
     typer.echo(f"◷ waiting {wait_s}s for the projector...")
     time.sleep(wait_s)
     typer.echo(f"\n? asking the agent: {question}\n")
-    result = _ask(question)
+    result = _ask(question, session_id=session, user_id=user, tags=["demo"])
     typer.echo(str(result))
 
 
