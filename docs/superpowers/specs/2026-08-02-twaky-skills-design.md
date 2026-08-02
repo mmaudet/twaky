@@ -394,14 +394,17 @@ SkillSummary:
 
 SkillCreate:
   type: object
-  required: [name, description, python_source, bound_agents]
+  # bound_agents is optional (defaults to []) per §5.3 — a skill with no
+  # bindings exists but cannot be called until an agent is bound. Kept
+  # unrequired to enable staged rollout.
+  required: [name, description, python_source]
   properties:
     name:           { type: string, pattern: '^[a-z][a-z0-9_]{0,63}$' }
     description:    { type: string, minLength: 1, maxLength: 1000 }
     python_source:  { type: string, minLength: 1, maxLength: 32000 }
     config_schema:  { type: object, additionalProperties: true, default: {} }
     config_values:  { type: object, additionalProperties: true, default: {} }
-    bound_agents:   { type: array, items: { type: string, enum: [atlas, chronos, plume, iris] } }
+    bound_agents:   { type: array, items: { type: string, enum: [atlas, chronos, plume, iris] }, default: [] }
     enabled:        { type: boolean, default: true }
 
 SkillUpdate:
