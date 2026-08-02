@@ -11,8 +11,7 @@ import { SkillBoundAgents } from '@/components/skills/skill-bound-agents'
 import { SkillConfigEditors } from '@/components/skills/skill-config-editors'
 import { SkillNameInput } from '@/components/skills/skill-name-input'
 import { SkillPythonEditor } from '@/components/skills/skill-python-editor'
-// TODO(SP5 T17): wire up SkillTestDialog
-// import { SkillTestDialog } from '@/components/skills/skill-test-dialog'
+import { SkillTestDialog } from '@/components/skills/skill-test-dialog'
 import {
   useCreateSkill, useSkill, useUpdateSkill, type Skill,
 } from '@/hooks/use-skills'
@@ -115,15 +114,11 @@ function SkillEditForm({ skill, id }: { skill: Skill | undefined, id: string }) 
       </div>
 
       <div className="col-span-3 flex items-center justify-between border-t pt-4">
-        {/* TODO(SP5 T17): wire up SkillTestDialog */}
-        {/* <SkillTestDialog
+        <SkillTestDialog
           skillId={id}
           disabled={isNew}
           tooltip={isNew ? 'Save the skill first, then test.' : undefined}
-        /> */}
-        <Button variant="outline" disabled={isNew}>
-          Test
-        </Button>
+        />
         <div className="space-x-2">
           <Button variant="outline" onClick={() => router.push('/skills')}>Cancel</Button>
           <Button onClick={handleSave} disabled={!isFormValid || !dirty}>
