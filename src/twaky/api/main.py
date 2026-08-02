@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
 from twaky.api.errors import register_exception_handlers
-from twaky.api.routers import events, health, me, missions, oauth
+from twaky.api.routers import agents, events, health, me, missions, oauth
 from twaky.api.session import SESSION_COOKIE_NAME
 from twaky.api.sse.broker import SSEBroker
 from twaky.config import settings
@@ -51,6 +51,7 @@ app.include_router(me.router)
 app.include_router(missions.router)
 app.include_router(oauth.router)
 app.include_router(events.router)
+app.include_router(agents.router)
 
 register_exception_handlers(app)
 

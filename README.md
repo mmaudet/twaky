@@ -248,6 +248,32 @@ git add src/lib/api-types.d.ts && git commit -m 'chore(frontend): regen API type
 
 CI blocks the merge if types are stale.
 
+## Agent configuration (sub-project 4)
+
+Every built-in agent (Atlas, Chronos, Plume, Iris) is configurable at
+runtime via the web UI at `/agents`. You edit the system prompt, model
+string (LiteLLM syntax), and temperature; changes take effect on the
+next sub-agent invocation — no `docker compose restart` required.
+
+**Storage:** table `agent` on `twaky-pg`, seeded once from `sql/006_init_agents.sh`.
+
+**Live-reload path:** the API's PATCH handler updates the row, a Postgres
+`AFTER UPDATE` trigger fires `NOTIFY agent_config_changed`, and the atlas
+daemon's `config_listener` task invalidates its cached `AgentConfig`.
+The next call to `load_agent_config(id)` re-reads the fresh row.
+
+**Fallbacks:**
+- `agent.model = NULL` → daemon uses `settings.model` (env var `TWAKY_MODEL`).
+- `agent.temperature = NULL` → daemon omits the parameter, LiteLLM's per-provider default applies.
+- Row missing from the DB → daemon uses `DEFAULT_PROMPTS` from `src/twaky/agents/defaults.py` (belt-and-braces safety).
+
+**In-flight missions:** a mission running during a save may see the new
+config on its next sub-agent invocation. No per-mission snapshotting —
+accepted trade-off (see design spec §4.4).
+
+**Not in this sub-project (deferred to 5):** creating new agents,
+editing tools, skill/connector store.
+
 ## Quickstart
 
 ```bash

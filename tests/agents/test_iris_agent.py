@@ -6,13 +6,16 @@ from unittest.mock import patch
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from tests.agents._fakes import scripted
+from tests.agents._fakes import scripted, stub_registry_for
 from twaky.agents.iris.agent import build_iris_agent
 
 
 def test_iris_answers_directly():
     llm = scripted([AIMessage(content="Acme Corp makes widgets.")])
-    with patch("twaky.agents.iris.agent._make_llm", return_value=llm):
+    with (
+        stub_registry_for("iris"),
+        patch("twaky.agents.iris.agent._make_llm", return_value=llm),
+    ):
         g = build_iris_agent()
         out = g.invoke({"messages": [HumanMessage(content="what does acme do?")]})
     assert "widgets" in out["messages"][-1].content.lower()

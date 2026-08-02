@@ -30,4 +30,8 @@ describe('Header', () => {
         // Before waitFor resolves, the button says "…"
         expect(screen.getByRole('button', { name: /…/ })).toBeInTheDocument()
     })
+    it('shows the Agents nav link', () => {
+        render(withQuery(<Header />))
+        expect(screen.getByRole('link', { name: 'Agents' })).toBeInTheDocument()
+    })
 })

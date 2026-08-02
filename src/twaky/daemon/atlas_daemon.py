@@ -10,6 +10,7 @@ from uuid import UUID
 import structlog
 from langchain_core.messages import HumanMessage
 
+from twaky.agents import config_listener, registry
 from twaky.agents.atlas.agent import build_atlas_agent
 from twaky.agents.atlas.pending import extract_pending_from_output
 from twaky.agents.atlas.tools import FINISH_MARKER
@@ -360,11 +361,14 @@ async def _main_loop() -> None:
 
     heart_task = asyncio.create_task(_heart())
 
+    config_task = asyncio.create_task(config_listener.run(stop))
+
     # Wait for shutdown.
     await stop.wait()
     listener_task.cancel()
     sweep_task.cancel()
     heart_task.cancel()
+    config_task.cancel()
     if tasks:
         log.info(f"draining {len(tasks)} in-flight missions")
         await asyncio.wait(tasks, timeout=25)
@@ -379,6 +383,7 @@ def run() -> None:
     """Entry point for `twaky atlas run`."""
     log.info("atlas daemon booting", owner=settings.twaky_owner_email)
     setup_checkpointer_tables()
+    registry.invalidate_all()  # clean cache slate after restart
     bump()
     asyncio.run(_main_loop())
     log.info("atlas daemon stopped")

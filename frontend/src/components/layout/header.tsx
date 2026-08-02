@@ -13,6 +13,8 @@ export function Header() {
                     <nav className="flex items-center gap-3 text-sm text-muted-foreground">
                         <Link href="/" className="hover:text-foreground">Dashboard</Link>
                         <span>·</span>
+                        <Link href="/agents" className="hover:text-foreground">Agents</Link>
+                        <span>·</span>
                         <Link href="/stats" className="hover:text-foreground">Stats</Link>
                     </nav>
                 </div>

@@ -6,13 +6,16 @@ from unittest.mock import patch
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from tests.agents._fakes import scripted
+from tests.agents._fakes import scripted, stub_registry_for
 from twaky.agents.chronos.agent import build_chronos_agent
 
 
 def test_chronos_answers_direct_without_tools():
     llm = scripted([AIMessage(content="You have no events tomorrow.")])
-    with patch("twaky.agents.chronos.agent._make_llm", return_value=llm):
+    with (
+        stub_registry_for("chronos"),
+        patch("twaky.agents.chronos.agent._make_llm", return_value=llm),
+    ):
         graph = build_chronos_agent()
         out = graph.invoke({"messages": [HumanMessage(content="what's on tomorrow?")]})
     final = out["messages"][-1]
@@ -40,6 +43,7 @@ def test_chronos_uses_a_tool():
         ]
     )
     with (
+        stub_registry_for("chronos"),
         patch("twaky.agents.chronos.agent._make_llm", return_value=llm),
         patch("twaky.agents.chronos.tools.get_pool") as p,
     ):
