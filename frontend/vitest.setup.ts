@@ -1,5 +1,13 @@
 import '@testing-library/jest-dom/vitest'
 import { afterAll, afterEach, beforeAll } from 'vitest'
+
+// Polyfill ResizeObserver for Radix UI components (Slider uses @radix-ui/react-use-size)
+// jsdom does not implement ResizeObserver natively.
+global.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+}
 // Polyfill global.fetch with undici so MSW 2.x can intercept openapi-fetch
 // calls in the jsdom environment. jsdom ships its own fetch polyfill that MSW
 // does not wrap; undici is the same fetch implementation Node 18+ uses

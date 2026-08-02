@@ -63,7 +63,7 @@ describe('useAgent', () => {
         await waitFor(() => expect(result.current.isError).toBe(true))
         const error = result.current.error
         expect(error).not.toBeNull()
-        expect((error as { envelope: { error: { code: string } } }).envelope.error.code).toBe('agent_not_found')
+        expect((error as unknown as { envelope: { error: { code: string } } }).envelope.error.code).toBe('agent_not_found')
     })
 })
 
@@ -122,6 +122,6 @@ describe('useUpdateAgent', () => {
         await waitFor(() => expect(result.current.isError).toBe(true))
         const error = result.current.error
         expect(error).not.toBeNull()
-        expect((error as { envelope: { error: { code: string } } }).envelope.error.code).toBe('validation_failed')
+        expect((error as unknown as { envelope: { error: { code: string } } }).envelope.error.code).toBe('validation_failed')
     })
 })
