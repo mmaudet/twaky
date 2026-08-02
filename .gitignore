@@ -28,7 +28,10 @@ wheels/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Metabase local plugin state (H2 database, driver cache) — runtime container data, not source
 .metabase-admin.password
+metabase/plugins/*.db.mv.db
 metabase/plugins/*.jar
 
 # Frontend build artifacts
