@@ -529,6 +529,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /skills/{skill_id}/test:
+    post:
+      tags:
+      - skills
+      summary: Test Skill
+      operationId: test_skill_skills__skill_id__test_post
+      parameters:
+      - name: skill_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Skill Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillTestRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillTestResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     Agent:
@@ -956,6 +989,37 @@ components:
       - updated_at
       title: SkillSummary
       description: Shorter payload for the list endpoint. Omits code + config.
+    SkillTestRequest:
+      properties:
+        args:
+          additionalProperties: true
+          type: object
+          title: Args
+      additionalProperties: false
+      type: object
+      title: SkillTestRequest
+    SkillTestResponse:
+      properties:
+        outcome:
+          type: string
+          enum:
+          - ok
+          - timeout
+          - crashed
+          - error
+          title: Outcome
+        result:
+          title: Result
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+      additionalProperties: false
+      type: object
+      required:
+      - outcome
+      title: SkillTestResponse
     SkillUpdate:
       properties:
         name:

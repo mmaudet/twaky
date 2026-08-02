@@ -300,3 +300,80 @@ class TestDeleteSkill:
             resp = client.delete(f"/skills/{uuid4()}")
         assert resp.status_code == 404
         assert resp.json()["error"]["code"] == "skill_not_found"
+
+
+# ---------------------------------------------------------------------------
+# POST /skills/{skill_id}/test
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+class TestSkillTestEndpoint:
+    def test_no_session_returns_401(self):
+        r = TestClient(app).post(f"/skills/{uuid4()}/test", json={"args": {}})
+        assert r.status_code == 401
+
+    def test_test_endpoint_ok_outcome(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        sk = _fake_skill("echo")
+        # python_source from _fake_skill: "def run(**kw): return 1"
+        with patch("twaky.api.routers.skills.repository.get", return_value=sk):
+            resp = client.post(f"/skills/{sk.id}/test", json={"args": {}})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["outcome"] == "ok"
+        assert body["result"] == 1
+
+    def test_test_endpoint_error_outcome(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        sk = _fake_skill("raiser")
+        from dataclasses import replace
+
+        sk = replace(sk, python_source="def run(**kw):\n    raise ValueError('nope')")
+        with patch("twaky.api.routers.skills.repository.get", return_value=sk):
+            resp = client.post(f"/skills/{sk.id}/test", json={"args": {}})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["outcome"] == "error"
+        assert "ValueError" in body["message"]
+        assert "nope" in body["message"]
+
+    def test_test_endpoint_timeout_outcome(self, monkeypatch):
+        from twaky.api.routers import skills as skills_router
+        from twaky.skills.executor import SkillTimeout
+
+        monkeypatch.setattr(
+            skills_router,
+            "run_skill",
+            lambda **kw: (_ for _ in ()).throw(SkillTimeout("boom")),
+        )
+        client = _owner_client(monkeypatch)
+        sk = _fake_skill("slow")
+        with patch("twaky.api.routers.skills.repository.get", return_value=sk):
+            resp = client.post(f"/skills/{sk.id}/test", json={"args": {}})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["outcome"] == "timeout"
+        assert "boom" in body["message"]
+
+    def test_test_endpoint_404_unknown_skill(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        with patch("twaky.api.routers.skills.repository.get", return_value=None):
+            resp = client.post(f"/skills/{uuid4()}/test", json={"args": {}})
+        assert resp.status_code == 404
+        assert resp.json()["error"]["code"] == "skill_not_found"
+
+    def test_test_endpoint_422_malformed_body(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        sk = _fake_skill("echo")
+        with patch("twaky.api.routers.skills.repository.get", return_value=sk):
+            resp = client.post(f"/skills/{sk.id}/test", json={"args": "not-a-dict"})
+        assert resp.status_code == 422
+
+    def test_test_endpoint_default_empty_args(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        sk = _fake_skill("echo")
+        with patch("twaky.api.routers.skills.repository.get", return_value=sk):
+            resp = client.post(f"/skills/{sk.id}/test", json={})
+        assert resp.status_code == 200
+        assert resp.json()["outcome"] == "ok"

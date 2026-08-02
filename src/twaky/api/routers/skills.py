@@ -11,7 +11,15 @@ from fastapi import APIRouter, Depends, Response, status
 
 from twaky.api.deps import require_owner
 from twaky.api.errors import error_response
-from twaky.api.schemas.skills import Skill, SkillCreate, SkillSummary, SkillUpdate
+from twaky.api.schemas.skills import (
+    Skill,
+    SkillCreate,
+    SkillSummary,
+    SkillTestRequest,
+    SkillTestResponse,
+    SkillUpdate,
+)
+from twaky.skills.executor import SkillCrashed, SkillError, SkillTimeout, run_skill
 from twaky.skills_config import repository, service
 from twaky.skills_config.repository import SkillNameConflict, SkillNotFound
 from twaky.skills_config.service import ValidationError
@@ -129,6 +137,37 @@ def delete_skill(skill_id: UUID, _email: str = Depends(require_owner)) -> Respon
             status_code=404,
         )
     return Response(status_code=204)
+
+
+@router.post("/{skill_id}/test", response_model=SkillTestResponse)
+def test_skill(
+    skill_id: UUID,
+    body: SkillTestRequest,
+    _email: str = Depends(require_owner),
+):
+    sk = repository.get(skill_id)
+    if sk is None:
+        return error_response(
+            code="skill_not_found",
+            message=f"skill {skill_id} not found",
+            status_code=404,
+        )
+    try:
+        result = run_skill(
+            python_source=sk.python_source,
+            args=body.args,
+            config=sk.config_values,
+            timeout_s=30,
+            memory_limit_mb=256,
+            cpu_seconds=60,
+        )
+    except SkillTimeout as exc:
+        return SkillTestResponse(outcome="timeout", message=str(exc))
+    except SkillCrashed as exc:
+        return SkillTestResponse(outcome="crashed", message=str(exc))
+    except SkillError as exc:
+        return SkillTestResponse(outcome="error", message=str(exc))
+    return SkillTestResponse(outcome="ok", result=result)
 
 
 __all__ = ["router"]
