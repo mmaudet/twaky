@@ -6,7 +6,7 @@
 
 ## 1. Goal
 
-Turn the four existing agents (**Atlas**, **Chronos**, **Plume**, **Iris**) from Python-hardcoded modules into Postgres-backed configurable entities. The owner edits `system_prompt`, `model`, and `temperature` via a web form; the daemon live-reloads the changed config on the next mission invocation, without a restart.
+Turn the four existing agents (**Atlas**, **Chronos**, **Plume**, **Iris**) from Python-hardcoded modules into Postgres-backed configurable entities. The owner edits `system_prompt`, `model`, and `temperature` via a web form; the daemon live-reloads the changed config on the next sub-agent invocation (see §4.4 for what this means for missions already in flight), without a restart.
 
 This is the first half of the "Agent Studio" vision surfaced during sub-project 3b brainstorming. It removes the current friction — editing Python files and running `docker compose restart twaky-atlas` — that prevents the owner from tuning agent behavior in the flow of daily use.
 
