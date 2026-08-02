@@ -68,7 +68,7 @@ def _validate_python_source(src: Any) -> str:
     if not (1 <= len(trimmed) <= 32000):
         raise ValidationError("python_source", "must be 1-32000 characters (trimmed)")
     try:
-        tree = ast.parse(src, mode="exec")
+        tree = ast.parse(trimmed, mode="exec")
     except SyntaxError as exc:
         raise ValidationError(
             "python_source",
@@ -79,7 +79,7 @@ def _validate_python_source(src: Any) -> str:
             "python_source",
             "module must define a top-level 'def run(...)' function",
         )
-    return src
+    return trimmed
 
 
 def _validate_bound_agents(agents: Any) -> list[str]:
@@ -156,6 +156,11 @@ def validate_patch(body: dict) -> dict:
     if "enabled" in body:
         patch["enabled"] = bool(body["enabled"])
     if "config_schema" in body or "config_values" in body:
+        # This service is stateless: it never fetches the persisted schema from storage.
+        # When the PATCH includes config_values without config_schema, validation runs
+        # against {} (empty schema, accepts anything). If the caller wants values
+        # validated against the current persisted schema, it must include config_schema
+        # in the same PATCH body.
         schema = _validate_json_schema(
             body.get("config_schema", {}) if "config_schema" in body else {}
         )
