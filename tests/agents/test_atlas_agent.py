@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from tests.agents._fakes import scripted
+from tests.agents._fakes import scripted, stub_registry_for
 from twaky.agents.atlas.agent import build_atlas_agent
 from twaky.agents.atlas.tools import FINISH_MARKER
 
@@ -41,6 +41,7 @@ def test_atlas_delegates_then_finishes():
         ]
     )
     with (
+        stub_registry_for("atlas"),
         patch("twaky.agents.atlas.agent._make_llm", return_value=llm),
         patch("twaky.agents.atlas.tools._chronos") as ch,
     ):

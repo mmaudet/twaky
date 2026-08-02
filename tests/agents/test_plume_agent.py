@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from tests.agents._fakes import scripted
+from tests.agents._fakes import scripted, stub_registry_for
 from twaky.agents.plume.agent import build_plume_agent
 
 
@@ -33,6 +33,7 @@ def test_plume_reads_and_drafts():
         ]
     )
     with (
+        stub_registry_for("plume"),
         patch("twaky.agents.plume.agent._make_llm", return_value=llm),
         patch("twaky.agents.plume.tools.JmapClient") as C,
         patch("twaky.agents.plume.tools.bearer_token_for_owner", return_value="TOK"),

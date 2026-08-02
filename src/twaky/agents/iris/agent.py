@@ -9,28 +9,28 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from twaky.agents.iris.tools import TOOLS
+from twaky.agents.registry import load_agent_config
 from twaky.agents.state import AgentState
+from twaky.agents_config.models import AgentConfig
 from twaky.config import settings
 
-_SYSTEM = (
-    "You are Iris, a research specialist. Use web_search to look things up, "
-    "read_url to fetch a page's main text, and ask_graph to cross-reference "
-    "with the Twake knowledge graph. Be concise. Never invent."
-)
 
-
-def _make_llm() -> BaseChatModel:
-    return ChatLiteLLM(
-        model=settings.iris_model or settings.model,
-        api_base=settings.litellm_api_base,
-    )
+def _make_llm(cfg: AgentConfig) -> BaseChatModel:
+    kwargs: dict = {
+        "model": cfg.model or settings.model,
+        "api_base": settings.litellm_api_base,
+    }
+    if cfg.temperature is not None:
+        kwargs["temperature"] = cfg.temperature
+    return ChatLiteLLM(**kwargs)
 
 
 def _agent_node(state: AgentState):
-    llm = _make_llm().bind_tools(TOOLS)
+    cfg = load_agent_config("iris")
+    llm = _make_llm(cfg).bind_tools(TOOLS)
     messages = state.get("messages", [])
     if not messages or not isinstance(messages[0], SystemMessage):
-        messages = [SystemMessage(content=_SYSTEM), *messages]
+        messages = [SystemMessage(content=cfg.system_prompt), *messages]
     return {"messages": [llm.invoke(messages)]}
 
 

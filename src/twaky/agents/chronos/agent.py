@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import SystemMessage
 from langchain_litellm import ChatLiteLLM
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -13,32 +14,30 @@ from twaky.agents.chronos.tools import (
     list_events,
     next_free_slot,
 )
+from twaky.agents.registry import load_agent_config
 from twaky.agents.state import AgentState
+from twaky.agents_config.models import AgentConfig
 from twaky.config import settings
 
 TOOLS = [list_events, get_event, find_conflicts, next_free_slot]
 
-_SYSTEM = (
-    "You are Chronos, the calendar specialist for a personal assistant. "
-    "You have tools to query the owner's calendar via the twake knowledge graph. "
-    "Use them, then answer concisely. Never invent events."
-)
 
-
-def _make_llm() -> BaseChatModel:
-    return ChatLiteLLM(
-        model=settings.chronos_model or settings.model,
-        api_base=settings.litellm_api_base,
-    )
+def _make_llm(cfg: AgentConfig) -> BaseChatModel:
+    kwargs: dict = {
+        "model": cfg.model or settings.model,
+        "api_base": settings.litellm_api_base,
+    }
+    if cfg.temperature is not None:
+        kwargs["temperature"] = cfg.temperature
+    return ChatLiteLLM(**kwargs)
 
 
 def _agent_node(state: AgentState):
-    from langchain_core.messages import SystemMessage
-
-    llm = _make_llm().bind_tools(TOOLS)
+    cfg = load_agent_config("chronos")
+    llm = _make_llm(cfg).bind_tools(TOOLS)
     messages = state.get("messages", [])
     if not messages or not isinstance(messages[0], SystemMessage):
-        messages = [SystemMessage(content=_SYSTEM), *messages]
+        messages = [SystemMessage(content=cfg.system_prompt), *messages]
     return {"messages": [llm.invoke(messages)]}
 
 

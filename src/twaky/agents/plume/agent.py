@@ -14,34 +14,30 @@ from twaky.agents.plume.tools import (
     read_email,
     search_emails,
 )
+from twaky.agents.registry import load_agent_config
 from twaky.agents.state import AgentState
+from twaky.agents_config.models import AgentConfig
 from twaky.config import settings
 
 TOOLS = [list_recent_emails, read_email, search_emails, draft_reply]
 
-_SYSTEM = (
-    "You are Plume, the mail specialist for a personal assistant. "
-    "Use the tools to read the owner's inbox and draft replies. "
-    "When you have produced a draft ready for approval, return a final "
-    "answer whose content is a JSON object of the shape "
-    '{"answer": "<short summary>", "pending_user_input": '
-    '{"kind": "approve_draft", "artifact": {"draft": "...", "to": "...", "subject": "..."}}}. '
-    "For any other outcome, answer plainly."
-)
 
-
-def _make_llm() -> BaseChatModel:
-    return ChatLiteLLM(
-        model=settings.plume_model or settings.model,
-        api_base=settings.litellm_api_base,
-    )
+def _make_llm(cfg: AgentConfig) -> BaseChatModel:
+    kwargs: dict = {
+        "model": cfg.model or settings.model,
+        "api_base": settings.litellm_api_base,
+    }
+    if cfg.temperature is not None:
+        kwargs["temperature"] = cfg.temperature
+    return ChatLiteLLM(**kwargs)
 
 
 def _agent_node(state: AgentState):
-    llm = _make_llm().bind_tools(TOOLS)
+    cfg = load_agent_config("plume")
+    llm = _make_llm(cfg).bind_tools(TOOLS)
     messages = state.get("messages", [])
     if not messages or not isinstance(messages[0], SystemMessage):
-        messages = [SystemMessage(content=_SYSTEM), *messages]
+        messages = [SystemMessage(content=cfg.system_prompt), *messages]
     return {"messages": [llm.invoke(messages)]}
 
 
