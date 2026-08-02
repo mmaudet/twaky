@@ -6,21 +6,8 @@ type MissionState = components['schemas']['MissionState']
 /**
  * Renders a horizontal timeline of states.
  * Reached states are filled; unreached are outlined.
- *
- * MVP: we don't have per-state timestamps in the API; we display timestamps
- * for `declared_at`, `started_at`, `terminated_at` when present.
  */
-export function StateTimeline({
-    currentState,
-    declaredAt: _declaredAt, // eslint-disable-line @typescript-eslint/no-unused-vars
-    startedAt: _startedAt,   // eslint-disable-line @typescript-eslint/no-unused-vars
-    terminatedAt: _terminatedAt, // eslint-disable-line @typescript-eslint/no-unused-vars
-}: {
-    currentState: MissionState
-    declaredAt: string
-    startedAt?: string | null
-    terminatedAt?: string | null
-}) {
+export function StateTimeline({ currentState }: { currentState: MissionState }) {
     const order: MissionState[] = [
         'declared', 'planning', 'running',
         'awaiting_user', 'done',

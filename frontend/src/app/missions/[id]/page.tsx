@@ -55,10 +55,7 @@ export default function MissionDetailPage({
 
             <section>
                 <h2 className="text-sm font-semibold mb-2">State timeline</h2>
-                <StateTimeline
-                    currentState={mission.state}
-                    declaredAt={mission.declared_at}
-                />
+                <StateTimeline currentState={mission.state} />
             </section>
 
             <section>
