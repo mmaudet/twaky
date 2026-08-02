@@ -77,7 +77,7 @@ export function SkillTestDialog({
         )}
 
         {outcome && (
-          <div className="space-y-2 border-t pt-3">
+          <div className="space-y-2 border-t pt-3" role="status" aria-live="polite">
             <Badge variant={badgeVariant[outcome]}>outcome: {outcome}</Badge>
             {outcome === 'ok' ? (
               <pre className="text-xs bg-muted p-2 rounded overflow-auto">

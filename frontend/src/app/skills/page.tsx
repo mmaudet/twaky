@@ -92,6 +92,7 @@ export default function SkillsPage() {
                                             'inline-block h-2.5 w-2.5 rounded-full ' +
                                             (s.enabled ? 'bg-green-500' : 'border border-muted-foreground')
                                         }
+                                        role="img"
                                         aria-label={s.enabled ? 'enabled' : 'disabled'}
                                     />
                                 </TableCell>
