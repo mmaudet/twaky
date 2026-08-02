@@ -227,6 +227,10 @@ class TestPostSkill:
 
 
 class TestPatchSkill:
+    def test_no_session_returns_401(self):
+        r = TestClient(app).patch(f"/skills/{uuid4()}", json={"description": "x"})
+        assert r.status_code == 401
+
     def test_patch_updates_description(self, monkeypatch):
         client = _owner_client(monkeypatch)
         sk = _fake_skill("echo")
@@ -278,6 +282,10 @@ class TestPatchSkill:
 
 
 class TestDeleteSkill:
+    def test_no_session_returns_401(self):
+        r = TestClient(app).delete(f"/skills/{uuid4()}")
+        assert r.status_code == 401
+
     def test_delete_returns_204(self, monkeypatch):
         client = _owner_client(monkeypatch)
         sk = _fake_skill("echo")
