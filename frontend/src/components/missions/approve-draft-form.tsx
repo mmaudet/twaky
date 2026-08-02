@@ -33,7 +33,7 @@ export function ApproveDraftForm({
                 userResponse: { approved: true, draft },
             })
             toast.success('Draft approved')
-        } catch { /* global handler */ }
+        } catch { /* handled globally */ }
     }
 
     async function handleReject() {
@@ -43,7 +43,7 @@ export function ApproveDraftForm({
                 reason: 'user_rejected_draft',
             })
             toast.success('Mission cancelled')
-        } catch { /* global handler */ }
+        } catch { /* handled globally */ }
     }
 
     return (

@@ -3,6 +3,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { QueryProvider } from '@/components/providers/query-provider'
 import { SSEProvider } from '@/components/providers/sse-provider'
 import { Header } from '@/components/layout/header'
+import { LoginTimeTracker } from '@/components/providers/login-time-tracker'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -14,6 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     return (
         <html lang="en" suppressHydrationWarning>
             <body>
+                <LoginTimeTracker />
                 <QueryProvider>
                     <SSEProvider>
                         <Header />

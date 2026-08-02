@@ -42,9 +42,9 @@ export function ArtifactAccordion({ artifacts }: { artifacts: Artifact[] }) {
         return <p className="text-sm text-muted-foreground">No artifacts yet.</p>
     }
 
-    const defaultOpen = artifacts.slice(-2).map((_, i) =>
-        `item-${artifacts.length - 2 + i}`,
-    ).filter((k) => k.startsWith('item-') && !k.includes('-')  === false)
+    const defaultOpen = artifacts.slice(-2).map((_, i, arr) =>
+        `item-${artifacts.length - arr.length + i}`,
+    )
 
     return (
         <Accordion type="multiple" defaultValue={defaultOpen}>

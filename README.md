@@ -165,15 +165,17 @@ every 15 s.
 `docs/api/openapi.yaml` is the source of truth for client generation.
 Regenerate with `make openapi`. CI enforces no drift.
 
-Sub-project 3b (Frontend Control Tower) consumes this file:
+Sub-project 3b (Frontend Control Tower) consumes this file via `openapi-typescript`:
 
 ```bash
-# Generate a typed TypeScript client
-npx openapi-typescript-codegen --input docs/api/openapi.yaml --output frontend/src/api
+# Regenerate typed stubs (run from frontend/)
+cd frontend && make api-types
 
 # Or spin a local mock backend for frontend dev
 npx @stoplight/prism-cli mock docs/api/openapi.yaml
 ```
+
+See the [Regenerating API types](#regenerating-api-types) section under "Twaky Frontend" for details.
 
 ### End-to-end scenario
 

@@ -32,14 +32,14 @@ export function GenericResumeForm({
         try {
             await resume.mutateAsync({ id: missionId, userResponse: parsed as Record<string, unknown> })
             toast.success('Response submitted')
-        } catch { /* global handler */ }
+        } catch { /* handled globally */ }
     }
 
     async function handleCancel() {
         try {
             await cancel.mutateAsync({ id: missionId, reason: 'user_cancelled_generic' })
             toast.success('Mission cancelled')
-        } catch { /* global handler */ }
+        } catch { /* handled globally */ }
     }
 
     return (

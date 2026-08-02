@@ -8,20 +8,16 @@ import { formatSessionExpiry } from '@/lib/format-session-expiry'
 
 const SESSION_TTL_SECONDS = 8 * 60 * 60
 
-// A rough approximation: the login timestamp is not available cross-origin
-// (the cookie is HttpOnly). We approximate as "current session started at page load".
-// A more precise implementation would store `loginAt` in sessionStorage on the OIDC
-// callback response — post-MVP polish.
+// LoginTimeTracker in the root layout initialises twaky_login_at on first page
+// load site-wide. We only read it here so the expiry is accurate regardless of
+// which page the user visited first.
 function useSessionExpiry(): string {
     const [loginAt] = useState<number>(() => {
         const stored = typeof window !== 'undefined'
             ? sessionStorage.getItem('twaky_login_at')
             : null
-        if (stored) return Number(stored)
-        if (typeof window !== 'undefined') {
-            sessionStorage.setItem('twaky_login_at', String(Date.now()))
-        }
-        return Date.now()
+        // Fall back to now if the tracker hasn't run yet (e.g. SSR or unit tests).
+        return stored ? Number(stored) : Date.now()
     })
     const [display, setDisplay] = useState<string>(() =>
         formatSessionExpiry(loginAt, SESSION_TTL_SECONDS),
