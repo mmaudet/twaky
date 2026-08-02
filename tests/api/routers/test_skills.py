@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from twaky.api.main import app
 from twaky.api.session import SESSION_COOKIE_NAME, sign_session
 from twaky.skills_config.models import Skill
+from twaky.skills_config.repository import SkillNameConflict, SkillNotFound
 
 
 @pytest.fixture(autouse=True)
@@ -109,3 +110,185 @@ class TestGetSkill:
         r = TestClient(app).get("/skills/not-a-uuid", cookies=_cookie())
         # FastAPI path-param validation rejects non-UUID strings with 422
         assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Helpers for POST / PATCH / DELETE tests
+# ---------------------------------------------------------------------------
+
+
+def _owner_client(monkeypatch) -> TestClient:
+    """Return a TestClient with a valid owner session cookie."""
+    from twaky import config as _cfg
+
+    monkeypatch.setattr("twaky.api.deps.settings", _cfg.Settings(_env_file=None))
+    return TestClient(app, cookies=_cookie())
+
+
+def _valid_body(**over) -> dict:
+    body: dict = {
+        "name": "echo",
+        "description": "Echo tool",
+        "python_source": "def run(**kwargs):\n    return 'ok'",
+        "bound_agents": ["atlas"],
+    }
+    body.update(over)
+    return body
+
+
+# ---------------------------------------------------------------------------
+# POST /skills
+# ---------------------------------------------------------------------------
+
+
+class TestPostSkill:
+    def test_post_401_without_session(self):
+        r = TestClient(app).post("/skills", json=_valid_body())
+        assert r.status_code == 401
+
+    def test_post_creates_skill(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        sk = _fake_skill("echo")
+        with patch("twaky.api.routers.skills.repository.create", return_value=sk):
+            resp = client.post("/skills", json=_valid_body())
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["name"] == "echo"
+        assert body["bound_agents"] == ["atlas"]
+
+    @pytest.mark.parametrize("bad_name", ["Echo", "1abc", "with-hyphen", ""])
+    def test_post_422_on_bad_name(self, monkeypatch, bad_name):
+        client = _owner_client(monkeypatch)
+        # Pydantic validates name pattern before reaching the router body
+        resp = client.post("/skills", json=_valid_body(name=bad_name))
+        assert resp.status_code == 422
+
+    def test_post_422_on_syntax_error(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        # Service layer: ast.parse fails → validation_failed
+        resp = client.post("/skills", json=_valid_body(python_source="def run("))
+        assert resp.status_code == 422
+        assert "SyntaxError" in resp.json()["error"]["message"]
+
+    def test_post_422_on_missing_run(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        # Service layer: no top-level def run → validation_failed
+        resp = client.post(
+            "/skills",
+            json=_valid_body(python_source="def other():\n    pass"),
+        )
+        assert resp.status_code == 422
+        assert "run" in resp.json()["error"]["message"].lower()
+
+    def test_post_422_on_unknown_bound_agent(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        # Pydantic validates Literal["atlas", ...] before reaching router body
+        resp = client.post("/skills", json=_valid_body(bound_agents=["atlas", "zeus"]))
+        assert resp.status_code == 422
+
+    def test_post_422_on_invalid_json_schema(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        body = _valid_body()
+        body["config_schema"] = {"type": "not-a-real-type"}
+        # Service layer: jsonschema.check_schema fails → validation_failed
+        resp = client.post("/skills", json=body)
+        assert resp.status_code == 422
+        assert resp.json()["error"]["code"] == "validation_failed"
+
+    def test_post_422_on_config_values_mismatching_schema(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        body = _valid_body()
+        body["config_schema"] = {
+            "type": "object",
+            "required": ["k"],
+            "properties": {"k": {"type": "string"}},
+        }
+        body["config_values"] = {}
+        # Service layer: jsonschema.validate fails → validation_failed
+        resp = client.post("/skills", json=body)
+        assert resp.status_code == 422
+        assert resp.json()["error"]["code"] == "validation_failed"
+
+    def test_post_422_on_duplicate_name(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        with patch(
+            "twaky.api.routers.skills.repository.create",
+            side_effect=SkillNameConflict("echo"),
+        ):
+            resp = client.post("/skills", json=_valid_body(name="echo"))
+        assert resp.status_code == 422
+        assert "already exists" in resp.json()["error"]["message"]
+        assert resp.json()["error"]["code"] == "validation_failed"
+
+
+# ---------------------------------------------------------------------------
+# PATCH /skills/{skill_id}
+# ---------------------------------------------------------------------------
+
+
+class TestPatchSkill:
+    def test_patch_updates_description(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        sk = _fake_skill("echo")
+        updated = _fake_skill("echo", skill_id=sk.id)
+        # Return a skill with an updated description
+        from dataclasses import replace
+
+        updated = replace(updated, description="new")
+        with patch("twaky.api.routers.skills.repository.update", return_value=updated):
+            resp = client.patch(f"/skills/{sk.id}", json={"description": "new"})
+        assert resp.status_code == 200
+        assert resp.json()["description"] == "new"
+
+    def test_patch_422_on_empty_body(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        sk = _fake_skill("echo")
+        # Empty body → service layer ValidationError ("at least one field required")
+        resp = client.patch(f"/skills/{sk.id}", json={})
+        assert resp.status_code == 422
+        assert "at least one field" in resp.json()["error"]["message"]
+        assert resp.json()["error"]["code"] == "validation_failed"
+
+    def test_patch_404_on_unknown(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        with patch(
+            "twaky.api.routers.skills.repository.update",
+            side_effect=SkillNotFound("not-found"),
+        ):
+            resp = client.patch(f"/skills/{uuid4()}", json={"description": "x"})
+        assert resp.status_code == 404
+        assert resp.json()["error"]["code"] == "skill_not_found"
+
+    def test_patch_422_on_name_collision(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        sk = _fake_skill("other")
+        with patch(
+            "twaky.api.routers.skills.repository.update",
+            side_effect=SkillNameConflict("taken"),
+        ):
+            resp = client.patch(f"/skills/{sk.id}", json={"name": "taken"})
+        assert resp.status_code == 422
+        assert "already exists" in resp.json()["error"]["message"]
+        assert resp.json()["error"]["code"] == "validation_failed"
+
+
+# ---------------------------------------------------------------------------
+# DELETE /skills/{skill_id}
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteSkill:
+    def test_delete_returns_204(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        sk = _fake_skill("echo")
+        with patch("twaky.api.routers.skills.repository.delete", return_value=True):
+            resp = client.delete(f"/skills/{sk.id}")
+        assert resp.status_code == 204
+        assert resp.content == b""
+
+    def test_delete_404_on_unknown(self, monkeypatch):
+        client = _owner_client(monkeypatch)
+        with patch("twaky.api.routers.skills.repository.delete", return_value=False):
+            resp = client.delete(f"/skills/{uuid4()}")
+        assert resp.status_code == 404
+        assert resp.json()["error"]["code"] == "skill_not_found"
