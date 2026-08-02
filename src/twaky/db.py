@@ -34,6 +34,16 @@ def get_pool() -> ConnectionPool:
             min_size=1,
             max_size=4,
             configure=_configure_conn,
+            # Idle connections held forever get silently killed by Postgres
+            # (or by NAT in Docker networks) — the next check-out then raises
+            # psycopg.OperationalError "server closed the connection
+            # unexpectedly". Cycle connections proactively:
+            #  - max_idle=300s: recycle after 5 min of inactivity (below any
+            #    reasonable server/network idle timeout).
+            #  - max_lifetime=3600s: hard-cap connection lifetime at 1h to
+            #    catch slower leaks (server-side timeouts, DNS rebalancing).
+            max_idle=300.0,
+            max_lifetime=3600.0,
             open=True,
         )
     return _pool
