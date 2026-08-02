@@ -38,7 +38,9 @@ class SkillError(Exception):
 
 def _set_rlimits(memory_limit_mb: int, cpu_seconds: int) -> None:
     """Apply resource caps inside the child. Linux-only for RLIMIT_NPROC."""
-    resource.setrlimit(resource.RLIMIT_AS, (memory_limit_mb * _MB, memory_limit_mb * _MB))
+    resource.setrlimit(
+        resource.RLIMIT_AS, (memory_limit_mb * _MB, memory_limit_mb * _MB)
+    )
     resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
     # RLIMIT_NPROC on macOS counts parent's threads — setting it to 0 kills
     # the whole test harness. Only apply on Linux.
