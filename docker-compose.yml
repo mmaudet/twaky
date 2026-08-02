@@ -94,13 +94,44 @@ services:
       retries: 3
       start_period: 30s
     labels:
+      # T3-moved-to-frontend: traefik.enable=true
+      # T3-moved-to-frontend: traefik.http.routers.twaky-api.rule=Host(`twaky.${BASE_DOMAIN}`)
+      # T3-moved-to-frontend: traefik.http.routers.twaky-api.entrypoints=websecure
+      # T3-moved-to-frontend: traefik.http.routers.twaky-api.tls=true
+      # T3-moved-to-frontend: traefik.http.routers.twaky-api.tls.certresolver=letsencrypt
+      # T3-moved-to-frontend: traefik.http.services.twaky-api.loadbalancer.server.port=8000
+      - "traefik.docker.network=twake-network"
+
+  twaky-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: twaky-frontend:local
+    container_name: twaky-frontend
+    restart: unless-stopped
+    networks:
+      - twake-network
+    environment:
+      - NODE_ENV=production
+      - API_INTERNAL_URL=http://twaky-api:8000
+      - NEXT_PUBLIC_APP_NAME=Twaky
+    depends_on:
+      twaky-api: { condition: service_healthy }
+    healthcheck:
+      # Proxies to twaky-api /healthz — passes when both are up (the correct signal for the entry container).
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    labels:
       - "traefik.enable=true"
       - "traefik.docker.network=twake-network"
-      - "traefik.http.routers.twaky-api.rule=Host(`twaky.${BASE_DOMAIN}`)"
-      - "traefik.http.routers.twaky-api.entrypoints=websecure"
-      - "traefik.http.routers.twaky-api.tls=true"
-      - "traefik.http.routers.twaky-api.tls.certresolver=letsencrypt"
-      - "traefik.http.services.twaky-api.loadbalancer.server.port=8000"
+      - "traefik.http.routers.twaky-frontend.rule=Host(`twaky.${BASE_DOMAIN}`)"
+      - "traefik.http.routers.twaky-frontend.entrypoints=websecure"
+      - "traefik.http.routers.twaky-frontend.tls=true"
+      - "traefik.http.routers.twaky-frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.twaky-frontend.loadbalancer.server.port=3000"
 
   # Interactive: not started by `docker compose up`; use
   #   docker compose run --rm twaky-agent twaky ask "..."
