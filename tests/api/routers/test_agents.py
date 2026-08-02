@@ -122,3 +122,98 @@ class TestDefaultPrompt:
         r = TestClient(app).get("/agents/zeus/default_prompt", cookies=_cookie())
         assert r.status_code == 404
         assert r.json()["error"]["code"] == "agent_not_found"
+
+
+class TestPatchAgent:
+    def test_no_session_returns_401(self):
+        r = TestClient(app).patch("/agents/plume", json={"temperature": 0.3})
+        assert r.status_code == 401
+
+    def test_happy_temperature(self, monkeypatch):
+        from dataclasses import replace
+
+        from twaky import config as _cfg
+
+        monkeypatch.setattr("twaky.api.deps.settings", _cfg.Settings(_env_file=None))
+
+        updated_cfg = replace(_fake_cfg("plume"), temperature=0.3)
+
+        with patch(
+            "twaky.api.routers.agents.repository.update",
+            return_value=updated_cfg,
+        ) as up:
+            r = TestClient(app).patch(
+                "/agents/plume",
+                json={"temperature": 0.3},
+                cookies=_cookie(),
+            )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["temperature"] == 0.3
+        up.assert_called_once_with("plume", {"temperature": 0.3})
+
+    def test_happy_model_null(self, monkeypatch):
+        from dataclasses import replace
+
+        from twaky import config as _cfg
+
+        monkeypatch.setattr("twaky.api.deps.settings", _cfg.Settings(_env_file=None))
+        cfg = replace(_fake_cfg("plume"), model=None)
+        with patch("twaky.api.routers.agents.repository.update", return_value=cfg):
+            r = TestClient(app).patch(
+                "/agents/plume", json={"model": None}, cookies=_cookie()
+            )
+        assert r.status_code == 200
+        assert r.json()["model"] is None
+
+    def test_temperature_out_of_range_returns_422(self, monkeypatch):
+        from twaky import config as _cfg
+
+        monkeypatch.setattr("twaky.api.deps.settings", _cfg.Settings(_env_file=None))
+        r = TestClient(app).patch(
+            "/agents/plume", json={"temperature": 3.0}, cookies=_cookie()
+        )
+        # Either pydantic (le=2.0) OR our service raises 422 — both acceptable
+        assert r.status_code == 422
+
+    def test_empty_prompt_returns_422(self, monkeypatch):
+        from twaky import config as _cfg
+
+        monkeypatch.setattr("twaky.api.deps.settings", _cfg.Settings(_env_file=None))
+        r = TestClient(app).patch(
+            "/agents/plume", json={"system_prompt": "   "}, cookies=_cookie()
+        )
+        assert r.status_code == 422
+
+    def test_empty_body_returns_422(self, monkeypatch):
+        from twaky import config as _cfg
+
+        monkeypatch.setattr("twaky.api.deps.settings", _cfg.Settings(_env_file=None))
+        r = TestClient(app).patch("/agents/plume", json={}, cookies=_cookie())
+        assert r.status_code == 422
+        assert r.json()["error"]["code"] == "validation_failed"
+
+    def test_unknown_agent_returns_404(self, monkeypatch):
+        from twaky import config as _cfg
+        from twaky.agents_config.repository import AgentConfigNotFound
+
+        monkeypatch.setattr("twaky.api.deps.settings", _cfg.Settings(_env_file=None))
+        with patch(
+            "twaky.api.routers.agents.repository.update",
+            side_effect=AgentConfigNotFound("no"),
+        ):
+            r = TestClient(app).patch(
+                "/agents/zeus", json={"temperature": 0.5}, cookies=_cookie()
+            )
+        assert r.status_code == 404
+        assert r.json()["error"]["code"] == "agent_not_found"
+
+    def test_unknown_field_returns_422(self, monkeypatch):
+        from twaky import config as _cfg
+
+        monkeypatch.setattr("twaky.api.deps.settings", _cfg.Settings(_env_file=None))
+        r = TestClient(app).patch(
+            "/agents/plume", json={"tools": ["read_email"]}, cookies=_cookie()
+        )
+        # pydantic extra="forbid" rejects unknown fields with 422
+        assert r.status_code == 422

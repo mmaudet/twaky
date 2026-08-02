@@ -351,6 +351,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - agents
+      summary: Patch Agent
+      operationId: patch_agent_agents__agent_id__patch
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /agents/{agent_id}/default_prompt:
     get:
       tags:
@@ -467,6 +498,31 @@ components:
       - effective_model
       - updated_at
       title: AgentSummary
+    AgentUpdate:
+      properties:
+        system_prompt:
+          anyOf:
+          - type: string
+            maxLength: 8000
+            minLength: 1
+          - type: 'null'
+          title: System Prompt
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+        temperature:
+          anyOf:
+          - type: number
+            maximum: 2.0
+            minimum: 0.0
+          - type: 'null'
+          title: Temperature
+      additionalProperties: false
+      type: object
+      title: AgentUpdate
+      description: Partial update. All fields optional; empty body → 422 (see router).
     CancelBody:
       properties:
         reason:
