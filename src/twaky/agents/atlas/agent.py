@@ -13,6 +13,7 @@ from twaky.agents.registry import load_agent_config
 from twaky.agents.state import AtlasState
 from twaky.agents_config.models import AgentConfig
 from twaky.config import settings
+from twaky.skills.agent_tools import merged_tools_for
 
 
 def _make_llm(cfg: AgentConfig) -> BaseChatModel:
@@ -27,7 +28,7 @@ def _make_llm(cfg: AgentConfig) -> BaseChatModel:
 
 def _atlas_node(state: AtlasState):
     cfg = load_agent_config("atlas")
-    llm = _make_llm(cfg).bind_tools(ALL_TOOLS)
+    llm = _make_llm(cfg).bind_tools(merged_tools_for("atlas", ALL_TOOLS))
     messages = state.get("messages", [])
     if not messages or not isinstance(messages[0], SystemMessage):
         messages = [SystemMessage(content=cfg.system_prompt), *messages]
@@ -58,10 +59,15 @@ def _route(state: AtlasState):
     return END
 
 
+def _atlas_tools_node(state: AtlasState):
+    tools = merged_tools_for("atlas", ALL_TOOLS)
+    return ToolNode(tools).invoke(state)
+
+
 def build_atlas_agent(checkpointer=None):
     g = StateGraph(AtlasState)
     g.add_node("atlas", _atlas_node)
-    g.add_node("tools", ToolNode(ALL_TOOLS))
+    g.add_node("tools", _atlas_tools_node)
     g.add_edge(START, "atlas")
     g.add_conditional_edges("atlas", _route, {"tools": "tools", END: END})
     g.add_conditional_edges("tools", _route, {"atlas": "atlas", END: END})
