@@ -16,8 +16,6 @@ from twaky.agents import config_listener, registry
 from twaky.agents_config import repository
 from twaky.config import settings
 
-pytestmark = pytest.mark.integration
-
 
 def _dsn() -> str:
     return os.environ.get("TWAKY_TEST_DSN") or settings.pg_dsn
@@ -31,7 +29,10 @@ def _reachable() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(not _reachable(), reason="twaky-pg not reachable")
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(not _reachable(), reason="twaky-pg not reachable"),
+]
 
 
 @pytest.mark.asyncio
