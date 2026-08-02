@@ -13,6 +13,7 @@ dependencies = [
     "fastapi>=0.115",
     "httpx>=0.28",
     "itsdangerous>=2.2",
+    "jsonschema>=4.21",
     "langchain>=1.0",
     "langchain-community>=0.3",
     "langchain-core>=0.3",
@@ -49,6 +50,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
+    "types-jsonschema>=4.26.0.20260518",
 ]
 
 [tool.pytest.ini_options]

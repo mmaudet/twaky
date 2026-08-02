@@ -408,6 +408,160 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /skills:
+    get:
+      tags:
+      - skills
+      summary: List Skills
+      operationId: list_skills_skills_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/SkillSummary'
+                type: array
+                title: Response List Skills Skills Get
+    post:
+      tags:
+      - skills
+      summary: Create Skill
+      operationId: create_skill_skills_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillCreate'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /skills/{skill_id}:
+    get:
+      tags:
+      - skills
+      summary: Get Skill
+      operationId: get_skill_skills__skill_id__get
+      parameters:
+      - name: skill_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Skill Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - skills
+      summary: Patch Skill
+      operationId: patch_skill_skills__skill_id__patch
+      parameters:
+      - name: skill_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Skill Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - skills
+      summary: Delete Skill
+      operationId: delete_skill_skills__skill_id__delete
+      parameters:
+      - name: skill_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Skill Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /skills/{skill_id}/test:
+    post:
+      tags:
+      - skills
+      summary: Test Skill
+      operationId: test_skill_skills__skill_id__test_post
+      parameters:
+      - name: skill_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Skill Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillTestRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillTestResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     Agent:
@@ -682,6 +836,246 @@ components:
       required:
       - user_response
       title: ResumeBody
+    Skill:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Name
+        description:
+          type: string
+          maxLength: 1000
+          minLength: 1
+          title: Description
+        python_source:
+          type: string
+          maxLength: 32000
+          minLength: 1
+          title: Python Source
+        config_schema:
+          additionalProperties: true
+          type: object
+          title: Config Schema
+        config_values:
+          additionalProperties: true
+          type: object
+          title: Config Values
+        bound_agents:
+          items:
+            type: string
+            enum:
+            - atlas
+            - chronos
+            - plume
+            - iris
+          type: array
+          title: Bound Agents
+        enabled:
+          type: boolean
+          title: Enabled
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - python_source
+      - config_schema
+      - config_values
+      - bound_agents
+      - enabled
+      - created_at
+      - updated_at
+      title: Skill
+    SkillCreate:
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Name
+        description:
+          type: string
+          maxLength: 1000
+          minLength: 1
+          title: Description
+        python_source:
+          type: string
+          maxLength: 32000
+          minLength: 1
+          title: Python Source
+        config_schema:
+          additionalProperties: true
+          type: object
+          title: Config Schema
+        config_values:
+          additionalProperties: true
+          type: object
+          title: Config Values
+        bound_agents:
+          items:
+            type: string
+            enum:
+            - atlas
+            - chronos
+            - plume
+            - iris
+          type: array
+          title: Bound Agents
+        enabled:
+          type: boolean
+          title: Enabled
+          default: true
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - description
+      - python_source
+      title: SkillCreate
+    SkillSummary:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+        bound_agents:
+          items:
+            type: string
+            enum:
+            - atlas
+            - chronos
+            - plume
+            - iris
+          type: array
+          title: Bound Agents
+        enabled:
+          type: boolean
+          title: Enabled
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - bound_agents
+      - enabled
+      - created_at
+      - updated_at
+      title: SkillSummary
+      description: Shorter payload for the list endpoint. Omits code + config.
+    SkillTestRequest:
+      properties:
+        args:
+          additionalProperties: true
+          type: object
+          title: Args
+      additionalProperties: false
+      type: object
+      title: SkillTestRequest
+    SkillTestResponse:
+      properties:
+        outcome:
+          type: string
+          enum:
+          - ok
+          - timeout
+          - crashed
+          - error
+          title: Outcome
+        result:
+          title: Result
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+      additionalProperties: false
+      type: object
+      required:
+      - outcome
+      title: SkillTestResponse
+    SkillUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            pattern: ^[a-z][a-z0-9_]{0,63}$
+          - type: 'null'
+          title: Name
+        description:
+          anyOf:
+          - type: string
+            maxLength: 1000
+            minLength: 1
+          - type: 'null'
+          title: Description
+        python_source:
+          anyOf:
+          - type: string
+            maxLength: 32000
+            minLength: 1
+          - type: 'null'
+          title: Python Source
+        config_schema:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Config Schema
+        config_values:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Config Values
+        bound_agents:
+          anyOf:
+          - items:
+              type: string
+              enum:
+              - atlas
+              - chronos
+              - plume
+              - iris
+            type: array
+          - type: 'null'
+          title: Bound Agents
+        enabled:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Enabled
+      additionalProperties: false
+      type: object
+      title: SkillUpdate
+      description: Partial update. All fields optional; empty body → 422 (enforced
+        in router).
     ValidationError:
       properties:
         loc:

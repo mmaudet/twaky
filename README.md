@@ -274,6 +274,68 @@ accepted trade-off (see design spec §4.4).
 **Not in this sub-project (deferred to 5):** creating new agents,
 editing tools, skill/connector store.
 
+## Custom skills (sub-project 5)
+
+Owner-authored Python skills, editable via the web UI, executed in an
+isolated subprocess, hot-reloaded via LISTEN/NOTIFY.
+
+### Concepts
+
+- A **skill** is a Python module with a top-level `def run(**kwargs)` function.
+  It is stored in Postgres (`skill` table) and can be bound to any subset
+  of the 4 built-in agents (`atlas`, `chronos`, `plume`, `iris`).
+- Each LLM tool call = one fresh `multiprocessing.Process`:
+  - `RLIMIT_AS` — 256 MB virtual memory.
+  - `RLIMIT_CPU` — 60 CPU-seconds.
+  - `RLIMIT_NPROC` — 0 (no forking; Linux only).
+  - Wall-clock timeout — 30 s.
+- Skills whose name collides with a built-in tool (`finish_mission`,
+  `delegate_to_*`) are dropped at bind time with a warning log — the
+  built-in tools always win.
+
+### Isolation caveats (spec §9.2)
+
+The subprocess boundary is a **safety** boundary, not a **security** one:
+
+- Skills inherit the daemon's env vars (`TWAKY_PG_PASSWORD`, provider
+  API keys are readable via `os.environ`).
+- Skills inherit the daemon's network stack — they can `httpx.get` any
+  internal service.
+- A malicious owner-authored skill can `os.kill(os.getppid(), SIGTERM)`
+  and take down the daemon.
+
+Trust model: the owner is the same person who has SSH access to the
+host. No new attack surface vs. editing Python files on disk.
+
+### First-time setup on an existing volume
+
+The migration only runs on fresh volumes. For an existing `twaky-pg`:
+
+```bash
+docker exec -i twaky-pg bash /docker-entrypoint-initdb.d/007_init_skills.sh
+```
+
+Then browse to `https://twaky.${BASE_DOMAIN}/skills`.
+
+### Authoring a skill
+
+1. Browse to `/skills`, click "+ New skill".
+2. Fill `name` (regex `^[a-z][a-z0-9_]{0,63}$`) and `description` (1-1000 chars).
+3. Write the Python in the Monaco editor. Must define a top-level
+   `def run(**kwargs)` (async is fine). Any Python from the daemon's image
+   is importable (`httpx`, stdlib, etc.).
+4. Optionally add a JSON Schema for `config_values` — values you don't
+   want the LLM to see (API endpoints, thresholds).
+5. Tick which agent(s) can call it.
+6. Click **Test** — runs the skill in a subprocess with production limits,
+   returns outcome + result.
+7. Click **Save**. The next agent invocation on any bound agent picks it up.
+
+### Removing a skill
+
+Click Delete on the list page. Confirmation dialog warns that in-flight
+missions using the skill will fail on the next call.
+
 ## Quickstart
 
 ```bash

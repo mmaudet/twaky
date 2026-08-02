@@ -4,10 +4,21 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from tests.agents._fakes import scripted, stub_registry_for
 from twaky.agents.chronos.agent import build_chronos_agent
+from twaky.skills import registry as skills_registry
+
+
+@pytest.fixture(autouse=True)
+def _stub_skills_for(monkeypatch):
+    """Prevent test agents from touching real Postgres for skill loading."""
+    monkeypatch.setattr(skills_registry, "_repository_get_bound", lambda agent_id: [])
+    skills_registry.invalidate_all()
+    yield
+    skills_registry.invalidate_all()
 
 
 def test_chronos_answers_direct_without_tools():

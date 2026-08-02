@@ -5,11 +5,22 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from tests.agents._fakes import scripted, stub_registry_for
 from twaky.agents.atlas.agent import build_atlas_agent
 from twaky.agents.atlas.tools import FINISH_MARKER
+from twaky.skills import registry as skills_registry
+
+
+@pytest.fixture(autouse=True)
+def _stub_skills_for(monkeypatch):
+    """Prevent test agents from touching real Postgres for skill loading."""
+    monkeypatch.setattr(skills_registry, "_repository_get_bound", lambda agent_id: [])
+    skills_registry.invalidate_all()
+    yield
+    skills_registry.invalidate_all()
 
 
 def test_atlas_delegates_then_finishes():
