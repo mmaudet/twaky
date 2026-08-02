@@ -17,7 +17,9 @@ export default function DashboardPage() {
 
 	const queryState: MissionState | undefined =
 		filter === 'all' || filter === 'live' ? undefined : filter
-	const { data, isLoading, error } = useMissions(queryState)
+	// Include terminal missions when the user browses done/failed/cancelled/all tabs.
+	const includeTerminal = filter !== 'live'
+	const { data, isLoading, error } = useMissions(queryState, includeTerminal)
 
 	const missions = (data ?? []).filter((m) => {
 		if (filter === 'all') return true

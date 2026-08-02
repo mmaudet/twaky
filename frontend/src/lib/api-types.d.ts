@@ -47,7 +47,10 @@ export interface paths {
         };
         /**
          * List Missions
-         * @description List live missions for the instance owner.
+         * @description List missions for the instance owner.
+         *
+         *     By default only live (non-terminal) missions are returned.
+         *     Pass ``include_terminal=true`` to include done/failed/cancelled missions.
          */
         get: operations["list_missions_missions_get"];
         put?: never;
@@ -380,6 +383,7 @@ export interface operations {
         parameters: {
             query?: {
                 state?: components["schemas"]["MissionState"] | null;
+                include_terminal?: boolean;
                 limit?: number;
                 offset?: number;
             };

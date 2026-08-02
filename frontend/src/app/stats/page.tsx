@@ -7,7 +7,7 @@ import { computeStateBreakdown } from '@/lib/compute-state-breakdown'
 import { useMissions } from '@/hooks/use-missions'
 
 export default function StatsPage() {
-    const { data, isLoading, error } = useMissions()  // no filter — all live
+    const { data, isLoading, error } = useMissions(undefined, true)  // include terminal for stats
 
     if (isLoading) return <p className="text-muted-foreground">Loading…</p>
     if (error) return <p className="text-red-600">Error: {error.message}</p>

@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query'
+import { QueryCache, QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { ApiError } from './api-error'
 import { sanitizeReturnTo } from './sanitize-return-to'
@@ -15,6 +15,16 @@ function handleUnauthorized(): void {
 
 export function createQueryClient(): QueryClient {
     return new QueryClient({
+        queryCache: new QueryCache({
+            onError: (error) => {
+                if (error instanceof ApiError && error.code === 'http_401') {
+                    toast.error('Session expired, redirecting...')
+                    handleUnauthorized()
+                    return
+                }
+                // Silent — component-level error UIs surface the message.
+            },
+        }),
         defaultOptions: {
             queries: {
                 retry: (failureCount, error) => {
