@@ -1,4 +1,4 @@
-"""GET /api/agents surface — auth + happy + 404 cases."""
+"""GET /agents surface (mounted without /api prefix) — auth + happy + 404 cases."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def _fake_cfg(agent_id: str, model: str | None = None) -> AgentConfig:
 
 class TestListAgents:
     def test_no_session_returns_401(self):
-        r = TestClient(app).get("/api/agents")
+        r = TestClient(app).get("/agents")
         assert r.status_code == 401
 
     def test_happy_returns_summaries(self, monkeypatch):
@@ -53,7 +53,7 @@ class TestListAgents:
             _fake_cfg("iris"),
         ]
         with patch("twaky.api.routers.agents.repository.list_all", return_value=rows):
-            r = TestClient(app).get("/api/agents", cookies=_cookie())
+            r = TestClient(app).get("/agents", cookies=_cookie())
         assert r.status_code == 200
         body = r.json()
         assert len(body) == 4
@@ -70,7 +70,7 @@ class TestGetAgent:
 
         cfg = _fake_cfg("plume", model="openai/gpt-4o")
         with patch("twaky.api.routers.agents.repository.get", return_value=cfg):
-            r = TestClient(app).get("/api/agents/plume", cookies=_cookie())
+            r = TestClient(app).get("/agents/plume", cookies=_cookie())
         assert r.status_code == 200
         body = r.json()
         assert body["id"] == "plume"
@@ -88,7 +88,7 @@ class TestGetAgent:
         # settings.model comes from the TWAKY_MODEL env fixture at module top.
         cfg = _fake_cfg("plume", model=None)
         with patch("twaky.api.routers.agents.repository.get", return_value=cfg):
-            r = TestClient(app).get("/api/agents/plume", cookies=_cookie())
+            r = TestClient(app).get("/agents/plume", cookies=_cookie())
         assert r.json()["effective_model"] == "sentinel-default-model"
 
     def test_missing_returns_404(self, monkeypatch):
@@ -97,7 +97,7 @@ class TestGetAgent:
         monkeypatch.setattr("twaky.api.deps.settings", _cfg.Settings(_env_file=None))
 
         with patch("twaky.api.routers.agents.repository.get", return_value=None):
-            r = TestClient(app).get("/api/agents/zeus", cookies=_cookie())
+            r = TestClient(app).get("/agents/zeus", cookies=_cookie())
         assert r.status_code == 404
         assert r.json()["error"]["code"] == "agent_not_found"
 
@@ -108,7 +108,7 @@ class TestDefaultPrompt:
 
         monkeypatch.setattr("twaky.api.deps.settings", _cfg.Settings(_env_file=None))
 
-        r = TestClient(app).get("/api/agents/plume/default_prompt", cookies=_cookie())
+        r = TestClient(app).get("/agents/plume/default_prompt", cookies=_cookie())
         assert r.status_code == 200
         body = r.json()
         assert "system_prompt" in body
@@ -119,6 +119,6 @@ class TestDefaultPrompt:
 
         monkeypatch.setattr("twaky.api.deps.settings", _cfg.Settings(_env_file=None))
 
-        r = TestClient(app).get("/api/agents/zeus/default_prompt", cookies=_cookie())
+        r = TestClient(app).get("/agents/zeus/default_prompt", cookies=_cookie())
         assert r.status_code == 404
         assert r.json()["error"]["code"] == "agent_not_found"

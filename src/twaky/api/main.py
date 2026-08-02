@@ -51,7 +51,7 @@ app.include_router(me.router)
 app.include_router(missions.router)
 app.include_router(oauth.router)
 app.include_router(events.router)
-app.include_router(agents.router, prefix="/api")
+app.include_router(agents.router)
 
 register_exception_handlers(app)
 

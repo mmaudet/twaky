@@ -309,8 +309,164 @@ paths:
           content:
             application/json:
               schema: {}
+  /agents:
+    get:
+      tags:
+      - agents
+      summary: List Agents
+      operationId: list_agents_agents_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/AgentSummary'
+                type: array
+                title: Response List Agents Agents Get
+  /agents/{agent_id}:
+    get:
+      tags:
+      - agents
+      summary: Get Agent
+      operationId: get_agent_agents__agent_id__get
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /agents/{agent_id}/default_prompt:
+    get:
+      tags:
+      - agents
+      summary: Get Default Prompt
+      operationId: get_default_prompt_agents__agent_id__default_prompt_get
+      parameters:
+      - name: agent_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Agent Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DefaultPromptResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    Agent:
+      properties:
+        id:
+          type: string
+          title: Id
+        display_name:
+          type: string
+          title: Display Name
+        role:
+          type: string
+          enum:
+          - orchestrator
+          - specialist
+          title: Role
+        system_prompt:
+          type: string
+          title: System Prompt
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+        temperature:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Temperature
+        effective_model:
+          type: string
+          title: Effective Model
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - display_name
+      - role
+      - system_prompt
+      - model
+      - temperature
+      - effective_model
+      - updated_at
+      title: Agent
+    AgentSummary:
+      properties:
+        id:
+          type: string
+          title: Id
+        display_name:
+          type: string
+          title: Display Name
+        role:
+          type: string
+          enum:
+          - orchestrator
+          - specialist
+          title: Role
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+        temperature:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Temperature
+        effective_model:
+          type: string
+          title: Effective Model
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - display_name
+      - role
+      - model
+      - temperature
+      - effective_model
+      - updated_at
+      title: AgentSummary
     CancelBody:
       properties:
         reason:
@@ -333,6 +489,16 @@ components:
       required:
       - intent_text
       title: DeclareBody
+    DefaultPromptResponse:
+      properties:
+        system_prompt:
+          type: string
+          title: System Prompt
+      additionalProperties: false
+      type: object
+      required:
+      - system_prompt
+      title: DefaultPromptResponse
     HTTPValidationError:
       properties:
         detail:
