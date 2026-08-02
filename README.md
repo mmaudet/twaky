@@ -181,6 +181,71 @@ npx @stoplight/prism-cli mock docs/api/openapi.yaml
 make scenarios-api
 ```
 
+## Twaky Frontend (sub-project 3b)
+
+Next.js 15 web UI for the instance owner. Lives under `frontend/` in this repo.
+
+### Local dev
+
+```bash
+cd frontend
+npm install
+npm run dev  # http://localhost:3000
+```
+
+The dev server needs `twaky-api` reachable. Set `API_INTERNAL_URL` in
+`frontend/.env.local` (e.g., `http://localhost:8000` if you're running
+`uvicorn twaky.api.main:app` locally, or leave as `http://twaky-api:8000` if
+you're running everything in docker-compose).
+
+### Auth
+
+Auth is cookie-only OIDC session against LemonLDAP-NG (via twaky-api's
+`/oauth/*` routes, proxied by Next.js).
+
+Prerequisite: the `twaky-api` OIDC client must be provisioned in the deploy
+repo's `twake_auth/config/lmConf-1.json.ldap.template` — same mechanism as
+`twaky-plume` and `twaky-langfuse`.
+
+For local dev without OIDC, forge a session cookie:
+```bash
+docker compose exec twaky-api uv run python scripts/sign-session.py \
+    michel.maudet@linagora.com
+```
+Then paste the value into DevTools → Application → Cookies as `twaky_session`.
+
+### Deploy
+
+```bash
+docker compose build twaky-frontend
+docker compose up -d twaky-frontend
+```
+
+Traefik routes `twaky.${BASE_DOMAIN}` to `twaky-frontend`, which proxies
+`/api/*` and `/oauth/*` to `twaky-api` over the internal network.
+
+### Tests
+
+```bash
+cd frontend
+npm run test:unit           # Vitest + RTL, ~50 tests
+npm run test:e2e            # Playwright, requires the docker stack up
+```
+
+E2E tests self-skip when the stack is not reachable. CI runs them behind
+a `run-e2e` label opt-in.
+
+### Regenerating API types
+
+Any time `docs/api/openapi.yaml` changes:
+```bash
+cd frontend
+make api-types
+git add src/lib/api-types.d.ts && git commit -m 'chore(frontend): regen API types'
+```
+
+CI blocks the merge if types are stale.
+
 ## Quickstart
 
 ```bash
