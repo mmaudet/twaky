@@ -8,10 +8,52 @@ from twaky.skills.executor import (
     SkillCrashed,
     SkillError,
     SkillTimeout,
+    _dispose_inherited_pool,
     run_skill,
 )
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
+
+
+def test_dispose_inherited_pool_closes_and_clears(monkeypatch):
+    """The helper must call .close() on the inherited pool AND clear the module handle."""
+    from twaky import db as _twaky_db
+
+    class _FakePool:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    fake = _FakePool()
+    monkeypatch.setattr(_twaky_db, "_pool", fake)
+
+    _dispose_inherited_pool()
+
+    assert fake.closed is True
+    assert _twaky_db._pool is None
+
+
+def test_dispose_inherited_pool_no_op_when_pool_missing(monkeypatch):
+    """Absent pool must not raise."""
+    from twaky import db as _twaky_db
+
+    monkeypatch.setattr(_twaky_db, "_pool", None)
+    _dispose_inherited_pool()  # must not raise
+    assert _twaky_db._pool is None
+
+
+def test_dispose_inherited_pool_swallows_close_errors(monkeypatch):
+    """A raising .close() must not propagate — child startup must remain robust."""
+    from twaky import db as _twaky_db
+
+    class _RaisingPool:
+        def close(self):
+            raise RuntimeError("cannot close")
+
+    monkeypatch.setattr(_twaky_db, "_pool", _RaisingPool())
+    _dispose_inherited_pool()  # must not raise
+    assert _twaky_db._pool is None
 
 
 def test_happy_path_returns_string():

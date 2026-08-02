@@ -11,6 +11,7 @@ this is a SAFETY boundary (catches accidents), not a SECURITY boundary
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import multiprocessing as mp
 import pickle
@@ -48,6 +49,26 @@ def _set_rlimits(memory_limit_mb: int, cpu_seconds: int) -> None:
         resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))
 
 
+def _dispose_inherited_pool() -> None:
+    """Close the parent's psycopg pool in the child and clear the module handle.
+
+    Fork inherits open TCP sockets — using them from the child would corrupt
+    the parent's connection state. Closing releases the child's copies of
+    those fds; clearing ``twaky.db._pool`` ensures any legitimate re-use in
+    the child (via ``twaky.db.get_pool``) opens a fresh child-owned pool.
+    """
+    try:
+        from twaky import db as _twaky_db
+    except Exception:  # noqa: BLE001
+        return
+    pool = getattr(_twaky_db, "_pool", None)
+    if pool is None:
+        return
+    with contextlib.suppress(Exception):
+        pool.close()
+    _twaky_db._pool = None
+
+
 def _worker(
     pipe: mp.connection.Connection,
     python_source: str,
@@ -56,6 +77,7 @@ def _worker(
     memory_limit_mb: int,
     cpu_seconds: int,
 ) -> None:
+    _dispose_inherited_pool()
     try:
         _set_rlimits(memory_limit_mb, cpu_seconds)
     except (ValueError, OSError) as exc:
