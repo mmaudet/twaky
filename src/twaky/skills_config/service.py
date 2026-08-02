@@ -137,8 +137,15 @@ def validate_create(body: dict) -> dict:
     return normalized
 
 
-def validate_patch(body: dict) -> dict:
-    """Partial validation for PATCH /skills/{id}. Empty body → ValidationError."""
+def validate_patch(body: dict, *, persisted_schema: dict | None = None) -> dict:
+    """Partial validation for PATCH /skills/{id}. Empty body → ValidationError.
+
+    The service is stateless: it never fetches the persisted schema itself.
+    Callers that want config_values validated against the current persisted
+    schema (when the PATCH does not also update config_schema) should load
+    it and pass it via ``persisted_schema``. Absent that, validation of
+    values falls back to an empty schema (accepts any object).
+    """
     if not isinstance(body, dict):
         raise ValidationError("_body", "must be an object")
     if not body:
@@ -156,19 +163,16 @@ def validate_patch(body: dict) -> dict:
     if "enabled" in body:
         patch["enabled"] = bool(body["enabled"])
     if "config_schema" in body or "config_values" in body:
-        # This service is stateless: it never fetches the persisted schema from storage.
-        # When the PATCH includes config_values without config_schema, validation runs
-        # against {} (empty schema, accepts anything). If the caller wants values
-        # validated against the current persisted schema, it must include config_schema
-        # in the same PATCH body.
-        schema = _validate_json_schema(
-            body.get("config_schema", {}) if "config_schema" in body else {}
-        )
         if "config_schema" in body:
+            schema = _validate_json_schema(body["config_schema"])
             patch["config_schema"] = schema
+        elif persisted_schema is not None:
+            # Caller supplied the currently persisted schema — validate against it.
+            schema = _validate_json_schema(persisted_schema)
+        else:
+            # Fallback (caller opted out): empty schema, accepts any object.
+            schema = {}
         if "config_values" in body:
-            # Validate values against the incoming schema if present, else empty
-            # schema (which accepts anything).
             patch["config_values"] = _validate_config_values(
                 schema, body["config_values"]
             )

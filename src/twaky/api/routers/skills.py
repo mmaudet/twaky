@@ -101,8 +101,23 @@ def patch_skill(
     _email: str = Depends(require_owner),
 ):
     provided = body.model_dump(exclude_unset=True)
+
+    # If the caller is patching config_values alone, validate against the
+    # currently persisted config_schema — not {} (which would accept anything).
+    # Keep the service stateless: the router loads the schema and passes it in.
+    persisted_schema: dict | None = None
+    if "config_values" in provided and "config_schema" not in provided:
+        current = repository.get(skill_id)
+        if current is None:
+            return error_response(
+                code="skill_not_found",
+                message=f"skill {skill_id} not found",
+                status_code=404,
+            )
+        persisted_schema = current.config_schema
+
     try:
-        patch = service.validate_patch(provided)
+        patch = service.validate_patch(provided, persisted_schema=persisted_schema)
     except ValidationError as exc:
         return error_response(
             code="validation_failed",

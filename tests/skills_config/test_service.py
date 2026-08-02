@@ -202,3 +202,36 @@ def test_patch_config_values_validated_against_new_schema():
         }
     )
     assert result["config_values"] == {"k": "v"}
+
+
+def test_patch_config_values_alone_validates_against_persisted_schema_when_provided():
+    persisted = {
+        "type": "object",
+        "required": ["endpoint"],
+        "properties": {"endpoint": {"type": "string"}},
+    }
+    # Missing "endpoint" — should fail against persisted schema.
+    with pytest.raises(ValidationError) as exc:
+        validate_patch({"config_values": {}}, persisted_schema=persisted)
+    assert exc.value.field == "config_values"
+
+
+def test_patch_config_values_alone_passes_when_matching_persisted_schema():
+    persisted = {
+        "type": "object",
+        "required": ["endpoint"],
+        "properties": {"endpoint": {"type": "string"}},
+    }
+    result = validate_patch(
+        {"config_values": {"endpoint": "https://x"}},
+        persisted_schema=persisted,
+    )
+    assert result["config_values"] == {"endpoint": "https://x"}
+
+
+def test_patch_config_values_alone_without_persisted_schema_accepts_anything():
+    """Backward-compat: when the caller does not provide the persisted schema,
+    fallback to {} (accepts any object) — preserves stateless-service default.
+    """
+    result = validate_patch({"config_values": {"whatever": 42}})
+    assert result["config_values"] == {"whatever": 42}

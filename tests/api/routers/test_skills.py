@@ -275,6 +275,48 @@ class TestPatchSkill:
         assert "already exists" in resp.json()["error"]["message"]
         assert resp.json()["error"]["code"] == "validation_failed"
 
+    def test_patch_config_values_alone_validates_against_persisted_schema(
+        self, monkeypatch
+    ):
+        """Router loads the persisted schema and passes it to the service so
+        config_values patched without config_schema still validates against
+        the current schema (not {} which would accept anything)."""
+        client = _owner_client(monkeypatch)
+        from dataclasses import replace
+
+        existing = replace(
+            _fake_skill("echo"),
+            config_schema={
+                "type": "object",
+                "required": ["endpoint"],
+                "properties": {"endpoint": {"type": "string"}},
+            },
+        )
+        # repository.get is called first to fetch the persisted schema; then
+        # validation fires against it and rejects — repository.update never
+        # runs (assert via no patch on it).
+        with patch("twaky.api.routers.skills.repository.get", return_value=existing):
+            resp = client.patch(
+                f"/skills/{existing.id}",
+                json={"config_values": {"wrong_field": 1}},
+            )
+        assert resp.status_code == 422
+        body = resp.json()
+        assert body["error"]["code"] == "validation_failed"
+        assert body["error"]["detail"] == {"field": "config_values"}
+
+    def test_patch_config_values_alone_404_when_skill_missing(self, monkeypatch):
+        """If the caller PATCHes config_values on an unknown UUID, we return
+        404 during the pre-fetch — no need to enter the update path."""
+        client = _owner_client(monkeypatch)
+        with patch("twaky.api.routers.skills.repository.get", return_value=None):
+            resp = client.patch(
+                f"/skills/{uuid4()}",
+                json={"config_values": {"anything": 1}},
+            )
+        assert resp.status_code == 404
+        assert resp.json()["error"]["code"] == "skill_not_found"
+
 
 # ---------------------------------------------------------------------------
 # DELETE /skills/{skill_id}
