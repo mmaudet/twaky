@@ -44,12 +44,21 @@ def declare(body: DeclareBody, email: str = Depends(require_owner)) -> Mission:
 @router.get("", response_model=list[Mission])
 def list_missions(
     state: Annotated[MissionState | None, Query()] = None,
+    include_terminal: Annotated[bool, Query()] = False,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: int = 0,
     email: str = Depends(require_owner),
 ) -> list[Mission]:
-    """List live missions for the instance owner."""
-    rows = repository.list_live(email)
+    """List missions for the instance owner.
+
+    By default only live (non-terminal) missions are returned.
+    Pass ``include_terminal=true`` to include done/failed/cancelled missions.
+    """
+    rows = (
+        repository.list_all(email, limit=limit + offset)
+        if include_terminal
+        else repository.list_live(email)
+    )
     if state is not None:
         rows = [r for r in rows if r.state == state]
     return rows[offset : offset + limit]
