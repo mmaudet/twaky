@@ -115,3 +115,47 @@ jobs:
           make api-types
           git diff --exit-code src/lib/api-types.d.ts \
             || (echo 'ERROR: api-types.d.ts is stale — run `make api-types` and commit.' && exit 1)
+
+  frontend-e2e:
+    if: contains(github.event.pull_request.labels.*.name, 'run-e2e') || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: [frontend]
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install npm deps
+        run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+      - name: Boot the stack
+        working-directory: .
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d twaky-pg twaky-api twaky-frontend
+          # Wait for twaky-frontend to be healthy (depends on twaky-api)
+          for i in {1..30}; do
+            status=$(docker inspect --format '{{.State.Health.Status}}' twaky-frontend 2>/dev/null || echo starting)
+            if [ "$status" = "healthy" ]; then break; fi
+            sleep 2
+          done
+          [ "$status" = "healthy" ] || (echo 'twaky-frontend never became healthy' && docker compose logs && exit 1)
+      - name: Copy seed helper into API container
+        working-directory: .
+        run: docker compose cp frontend/tests/e2e/seed-awaiting-user.py twaky-api:/tmp/seed-awaiting-user.py
+      - name: E2E tests
+        env:
+          TWAKY_TEST_STACK_URL: http://localhost:3000
+        run: npm run test:e2e
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7

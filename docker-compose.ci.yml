@@ -1,0 +1,10 @@
+# ─────────────────────────────────────────────────────────────────────
+# CI override for docker-compose.yml
+# Publishes twaky-frontend on localhost:3000 for GitHub Actions e2e tests.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.ci.yml up
+# ─────────────────────────────────────────────────────────────────────
+
+services:
+  twaky-frontend:
+    ports:
+      - "3000:3000"
