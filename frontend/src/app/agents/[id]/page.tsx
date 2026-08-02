@@ -10,6 +10,7 @@ import { RelativeTime } from '@/components/missions/relative-time'
 import { AgentPromptInput } from '@/components/agents/agent-prompt-input'
 import { AgentModelInput } from '@/components/agents/agent-model-input'
 import { AgentTemperatureInput } from '@/components/agents/agent-temperature-input'
+import { ResetToDefaultsDialog } from '@/components/agents/reset-to-defaults-dialog'
 import { useAgent, useUpdateAgent, type Agent, type AgentUpdate } from '@/hooks/use-agents'
 
 // Inner form — receives the loaded agent, so useState can be lazily initialized
@@ -76,6 +77,16 @@ function AgentEditForm({ agent }: { agent: Agent }) {
             <AgentTemperatureInput value={temperature} onChange={setTemperature} />
 
             <div className="flex items-center justify-end gap-2 pt-4">
+                <ResetToDefaultsDialog
+                    agentId={agent.id}
+                    displayName={agent.display_name}
+                    onReset={(defaultPrompt) => {
+                        setPrompt(defaultPrompt)
+                        setModel(null)
+                        setTemperature(null)
+                    }}
+                />
+                <div className="flex-1" />
                 <Link href="/agents">
                     <Button variant="ghost">Cancel</Button>
                 </Link>
