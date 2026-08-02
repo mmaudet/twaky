@@ -9,6 +9,7 @@ import { ArtifactAccordion } from '@/components/missions/artifact-accordion'
 import { CancelMissionDialog } from '@/components/missions/cancel-mission-dialog'
 import { Button } from '@/components/ui/button'
 import { useMission } from '@/hooks/use-mission'
+import { ResumeForm } from '@/components/missions/resume-form'
 
 export default function MissionDetailPage({
     params,
@@ -67,7 +68,14 @@ export default function MissionDetailPage({
                 <ArtifactAccordion artifacts={mission.artifacts ?? []} />
             </section>
 
-            {/* Resume form mounted here in T12 when state === 'awaiting_user'. */}
+            {mission.state === 'awaiting_user' && (
+                <section>
+                    <ResumeForm
+                        missionId={mission.id}
+                        artifacts={mission.artifacts ?? []}
+                    />
+                </section>
+            )}
         </div>
     )
 }
