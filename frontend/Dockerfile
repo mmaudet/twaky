@@ -23,6 +23,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
+# Install wget for healthcheck
+RUN apk add --no-cache wget
+
 # Non-root user
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs
