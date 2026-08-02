@@ -118,6 +118,18 @@ def list_live(owner_email: str) -> list[Mission]:
     return [_row_to_mission(r) for r in rows]
 
 
+def list_all(owner_email: str, limit: int = 500) -> list[Mission]:
+    """Return ALL missions (live + terminal) sorted by declared_at DESC."""
+    with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT * FROM mission WHERE owner_email = %s "
+            "ORDER BY declared_at DESC LIMIT %s",
+            (owner_email, limit),
+        )
+        rows = cur.fetchall()
+    return [_row_to_mission(r) for r in rows]
+
+
 def select_for_update(cur: Any, mission_id: UUID) -> Mission:
     """SELECT ... FOR UPDATE inside a caller's transaction. Locks the row."""
     cur.row_factory = dict_row
@@ -132,6 +144,7 @@ __all__ = [
     "MissionNotFound",
     "get",
     "insert",
+    "list_all",
     "list_live",
     "select_for_update",
     "update_state",

@@ -123,6 +123,56 @@ class TestList:
         r = TestClient(app).get("/missions?state=BOGUS", cookies=_cookie())
         assert r.status_code == 422
 
+    def test_include_terminal_false_uses_list_live(self, monkeypatch):
+        """Default (include_terminal absent/false) must call list_live only."""
+        from twaky import config as _cfg
+
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+
+        live = _fake_mission("live", state=MissionState.RUNNING)
+        with (
+            patch(
+                "twaky.api.routers.missions.repository.list_live", return_value=[live]
+            ) as mock_live,
+            patch(
+                "twaky.api.routers.missions.repository.list_all", return_value=[]
+            ) as mock_all,
+        ):
+            r = TestClient(app).get("/missions", cookies=_cookie())
+        assert r.status_code == 200
+        assert len(r.json()) == 1
+        mock_live.assert_called_once()
+        mock_all.assert_not_called()
+
+    def test_include_terminal_true_uses_list_all(self, monkeypatch):
+        """include_terminal=true must call list_all and include terminal states."""
+        from twaky import config as _cfg
+
+        new_settings = _cfg.Settings(_env_file=None)
+        monkeypatch.setattr("twaky.api.deps.settings", new_settings)
+
+        live = _fake_mission("live", state=MissionState.RUNNING)
+        done = _fake_mission("done", state=MissionState.DONE)
+        failed = _fake_mission("fail", state=MissionState.FAILED)
+        with (
+            patch(
+                "twaky.api.routers.missions.repository.list_all",
+                return_value=[live, done, failed],
+            ) as mock_all,
+            patch(
+                "twaky.api.routers.missions.repository.list_live", return_value=[]
+            ) as mock_live,
+        ):
+            r = TestClient(app).get(
+                "/missions?include_terminal=true", cookies=_cookie()
+            )
+        assert r.status_code == 200
+        states = {row["state"] for row in r.json()}
+        assert states == {"running", "done", "failed"}
+        mock_all.assert_called_once()
+        mock_live.assert_not_called()
+
 
 class TestDetail:
     def test_get_returns_mission(self, monkeypatch):

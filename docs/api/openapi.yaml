@@ -66,7 +66,12 @@ paths:
       tags:
       - missions
       summary: List Missions
-      description: List live missions for the instance owner.
+      description: 'List missions for the instance owner.
+
+
+        By default only live (non-terminal) missions are returned.
+
+        Pass ``include_terminal=true`` to include done/failed/cancelled missions.'
       operationId: list_missions_missions_get
       parameters:
       - name: state
@@ -77,6 +82,13 @@ paths:
           - $ref: '#/components/schemas/MissionState'
           - type: 'null'
           title: State
+      - name: include_terminal
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Include Terminal
       - name: limit
         in: query
         required: false

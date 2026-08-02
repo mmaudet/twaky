@@ -30,3 +30,12 @@ wheels/
 .ruff_cache/
 .metabase-admin.password
 metabase/plugins/*.jar
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/.next/
+frontend/.turbo/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/.env
