@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Toaster } from '@/components/ui/sonner'
 import { QueryProvider } from '@/components/providers/query-provider'
 import { SSEProvider } from '@/components/providers/sse-provider'
+import { Header } from '@/components/layout/header'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -15,7 +16,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <body>
                 <QueryProvider>
                     <SSEProvider>
-                        {children}
+                        <Header />
+                        <main className="mx-auto max-w-6xl px-4 py-6">
+                            {children}
+                        </main>
                         <Toaster />
                     </SSEProvider>
                 </QueryProvider>
