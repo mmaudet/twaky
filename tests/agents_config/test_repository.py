@@ -2,13 +2,33 @@
 
 from __future__ import annotations
 
+import os
+
+import psycopg
 import pytest
 
 from twaky.agents_config import repository
 from twaky.agents_config.models import AgentConfig
 from twaky.agents_config.repository import AgentConfigNotFound
+from twaky.config import settings
 
-pytestmark = pytest.mark.integration  # marks tests needing real DB
+
+def _dsn() -> str:
+    return os.environ.get("TWAKY_TEST_DSN") or settings.pg_dsn
+
+
+def _reachable() -> bool:
+    try:
+        with psycopg.connect(_dsn(), connect_timeout=1):
+            return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(not _reachable(), reason="twaky-pg not reachable"),
+]
 
 
 class TestListAll:
