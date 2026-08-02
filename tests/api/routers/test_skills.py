@@ -342,6 +342,8 @@ class TestSkillTestEndpoint:
         from twaky.api.routers import skills as skills_router
         from twaky.skills.executor import SkillTimeout
 
+        # Router-layer mapping test — patch run_skill instead of forcing a real
+        # fork+timeout, which would add ~500ms per run for no additional coverage.
         monkeypatch.setattr(
             skills_router,
             "run_skill",
@@ -355,6 +357,26 @@ class TestSkillTestEndpoint:
         body = resp.json()
         assert body["outcome"] == "timeout"
         assert "boom" in body["message"]
+
+    def test_test_endpoint_crashed_outcome(self, monkeypatch):
+        from twaky.api.routers import skills as skills_router
+        from twaky.skills.executor import SkillCrashed
+
+        # Router-layer mapping test — patch run_skill instead of forcing a real
+        # fork+timeout, which would add ~500ms per run for no additional coverage.
+        monkeypatch.setattr(
+            skills_router,
+            "run_skill",
+            lambda **kw: (_ for _ in ()).throw(SkillCrashed("segfault")),
+        )
+        client = _owner_client(monkeypatch)
+        sk = _fake_skill("crasher")
+        with patch("twaky.api.routers.skills.repository.get", return_value=sk):
+            resp = client.post(f"/skills/{sk.id}/test", json={"args": {}})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["outcome"] == "crashed"
+        assert "segfault" in body["message"]
 
     def test_test_endpoint_404_unknown_skill(self, monkeypatch):
         client = _owner_client(monkeypatch)
