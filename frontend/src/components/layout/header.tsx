@@ -15,6 +15,8 @@ export function Header() {
                         <span>·</span>
                         <Link href="/agents" className="hover:text-foreground">Agents</Link>
                         <span>·</span>
+                        <Link href="/skills" className="hover:text-foreground">Skills</Link>
+                        <span>·</span>
                         <Link href="/stats" className="hover:text-foreground">Stats</Link>
                     </nav>
                 </div>
