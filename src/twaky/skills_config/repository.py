@@ -121,6 +121,8 @@ def update(skill_id: UUID, patch: dict[str, Any]) -> Skill:
     if bad:
         raise ValueError(f"unknown fields: {sorted(bad)}")
 
+    # `allowed` above is the sole guard against SQL identifier injection: only
+    # whitelisted column names can reach the f-string below; values use %s placeholders.
     set_clauses: list[str] = []
     params: list[Any] = []
     for key, value in patch.items():
