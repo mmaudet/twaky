@@ -35,10 +35,25 @@ def _has_checkpoint(mission_id: UUID) -> bool:
 
 
 def resume_missions_after_restart(owner_email: str) -> list[tuple[UUID, Action]]:
-    """Reconcile live missions with checkpointer. Returns per-mission action."""
+    """Reconcile live missions with checkpointer. Returns per-mission action.
+
+    Only missions atlas can advance on its own are considered:
+      - PLANNING: crashed between start_planning and commit_plan → auto-failed
+        by _run_mission_sync (checkpoint_lost_during_planning).
+      - RUNNING: had a checkpoint mid-execution → resumed by atlas.
+
+    DECLARED and AWAITING_USER are intentionally left alone:
+      - DECLARED has no checkpoint yet; the declared-mission listener
+        picks it up on the next NOTIFY (or periodic sweep).
+      - AWAITING_USER waits for a user_response event — re-invoking the
+        graph at boot would re-emit request_user_input on an already-
+        AWAITING_USER row, which the state machine (correctly) rejects
+        as an illegal no-op transition. Only engine.resume (fired when
+        the user submits input) may move it to RUNNING and re-schedule.
+    """
     live = repository.list_live(owner_email)
-    # `declared` state doesn't have a checkpoint yet — skip it.
-    to_check = [m for m in live if m.state != MissionState.DECLARED]
+    resumable_by_atlas = {MissionState.PLANNING, MissionState.RUNNING}
+    to_check = [m for m in live if m.state in resumable_by_atlas]
 
     out: list[tuple[UUID, Action]] = []
     for m in to_check:
