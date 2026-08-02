@@ -28,7 +28,7 @@ import { toast } from 'sonner'
 import { useDeleteSkill, useSkills } from '@/hooks/use-skills'
 
 export default function SkillsPage() {
-    const { data: skills, isLoading } = useSkills()
+    const { data: skills, isLoading, error } = useSkills()
     const deleteSkill = useDeleteSkill()
     const [pendingDelete, setPendingDelete] = useState<string | null>(null)
 
@@ -44,6 +44,7 @@ export default function SkillsPage() {
     }
 
     if (isLoading) return <div className="p-8 text-muted-foreground">Loading…</div>
+    if (error) return <p className="text-red-600">Error: {error.message}</p>
 
     return (
         <div className="p-6 space-y-6">
