@@ -36,10 +36,10 @@ class SkillError(Exception):
     pass
 
 
-def _set_rlimits(memory_mb: int, cpu_s: int) -> None:
+def _set_rlimits(memory_limit_mb: int, cpu_seconds: int) -> None:
     """Apply resource caps inside the child. Linux-only for RLIMIT_NPROC."""
-    resource.setrlimit(resource.RLIMIT_AS, (memory_mb * _MB, memory_mb * _MB))
-    resource.setrlimit(resource.RLIMIT_CPU, (cpu_s, cpu_s))
+    resource.setrlimit(resource.RLIMIT_AS, (memory_limit_mb * _MB, memory_limit_mb * _MB))
+    resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
     # RLIMIT_NPROC on macOS counts parent's threads — setting it to 0 kills
     # the whole test harness. Only apply on Linux.
     if platform.system() == "Linux":
@@ -51,11 +51,11 @@ def _worker(
     python_source: str,
     args: dict,
     config: dict,
-    memory_mb: int,
-    cpu_s: int,
+    memory_limit_mb: int,
+    cpu_seconds: int,
 ) -> None:
     try:
-        _set_rlimits(memory_mb, cpu_s)
+        _set_rlimits(memory_limit_mb, cpu_seconds)
     except (ValueError, OSError) as exc:
         pipe.send(("error", f"rlimit setup failed: {type(exc).__name__}: {exc}"))
         sys.exit(2)
