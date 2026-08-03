@@ -20,11 +20,15 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
+import structlog
+
 from twaky import observability
 from twaky.db import get_pool
 from twaky.missions import repository
 from twaky.missions.guards import check_transition
 from twaky.missions.models import Mission, MissionState, PlanStep
+
+log = structlog.get_logger("twaky.missions.engine")
 
 
 def _trace(name: str, mission_id: UUID, extra: dict[str, Any] | None = None) -> Any:
@@ -215,13 +219,28 @@ def _notify_state_change(mission_id: UUID, new_state: MissionState) -> None:
 
 
 def _notify(channel: str, payload: str) -> None:
-    """Fire-and-forget PG NOTIFY; never raise from the engine path."""
+    """Fire-and-forget PG NOTIFY; never raise from the engine path.
+
+    Uses ``pg_notify(channel, payload)`` (SQL function form) instead of
+    the ``NOTIFY channel, payload`` command. The command form does NOT
+    accept parametrized payloads via psycopg's %s substitution — psycopg
+    generates ``NOTIFY channel, $1`` which Postgres rejects at parse time
+    with 'syntax error at or near "$1"'. The exception used to be
+    silently swallowed by the broad ``except Exception: pass`` below,
+    meaning every NOTIFY from this engine was a no-op — mission
+    scheduling relied entirely on the atlas daemon's 5-second periodic
+    sweep, and mission_resumed (no sweep fallback) simply never fired.
+
+    Kept ``except Exception: pass`` because NOTIFY failure must not
+    propagate into the transition path, but log at exception level so
+    future silent-failure regressions surface in observability.
+    """
     try:
         with get_pool().connection() as conn, conn.cursor() as cur:
-            cur.execute(f"NOTIFY {channel}, %s", (payload,))
+            cur.execute("SELECT pg_notify(%s, %s)", (channel, payload))
             conn.commit()
-    except Exception:  # noqa: BLE001, S110
-        pass
+    except Exception:
+        log.exception("NOTIFY delivery failed", channel=channel)
 
 
 __all__ = [
