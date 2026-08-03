@@ -11,7 +11,6 @@ this is a SAFETY boundary (catches accidents), not a SECURITY boundary
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import multiprocessing as mp
 import pickle
@@ -50,22 +49,26 @@ def _set_rlimits(memory_limit_mb: int, cpu_seconds: int) -> None:
 
 
 def _dispose_inherited_pool() -> None:
-    """Close the parent's psycopg pool in the child and clear the module handle.
+    """Clear the inherited psycopg pool handle in the child, WITHOUT closing it.
 
-    Fork inherits open TCP sockets — using them from the child would corrupt
-    the parent's connection state. Closing releases the child's copies of
-    those fds; clearing ``twaky.db._pool`` ensures any legitimate re-use in
-    the child (via ``twaky.db.get_pool``) opens a fresh child-owned pool.
+    Fork inherits open TCP sockets AND the ConnectionPool Python object. We
+    want the child to not use those sockets (they're shared with parent —
+    using them would corrupt parent state). But calling ``pool.close()`` in
+    the child sends PQfinish to Postgres, which server-side CLOSES the
+    sessions — killing the parent's pool too. Observed in prod as
+    'OperationalError: consuming input failed: server closed the connection'
+    on the next parent DB call after a skill invocation.
+
+    Correct approach: only NULL the module-level ``_pool`` reference so any
+    legitimate re-use of ``twaky.db.get_pool()`` in the child opens a fresh
+    child-owned pool. The child's inherited fds become unreferenced and are
+    reclaimed when the child exits seconds later — leaking a handful of fds
+    for the child's brief lifetime is safer than closing the shared sockets.
     """
     try:
         from twaky import db as _twaky_db
     except Exception:  # noqa: BLE001
         return
-    pool = getattr(_twaky_db, "_pool", None)
-    if pool is None:
-        return
-    with contextlib.suppress(Exception):
-        pool.close()
     _twaky_db._pool = None
 
 

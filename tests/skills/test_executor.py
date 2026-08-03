@@ -15,23 +15,32 @@ from twaky.skills.executor import (
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 
-def test_dispose_inherited_pool_closes_and_clears(monkeypatch):
-    """The helper must call .close() on the inherited pool AND clear the module handle."""
+def test_dispose_inherited_pool_clears_reference_without_closing(monkeypatch):
+    """CRITICAL: must NOT call .close() on the inherited pool — that would
+    send PQfinish to Postgres, killing sessions the PARENT is still using.
+
+    The child inherits shared TCP sockets on fork; closing them from the
+    child destroys them for the parent too. Only NULL the module handle so
+    a fresh child-owned pool would be created on re-use.
+    """
     from twaky import db as _twaky_db
 
-    class _FakePool:
-        closed = False
+    class _SentinelPool:
+        close_called = False
 
         def close(self):
-            self.closed = True
+            self.close_called = True
 
-    fake = _FakePool()
+    fake = _SentinelPool()
     monkeypatch.setattr(_twaky_db, "_pool", fake)
 
     _dispose_inherited_pool()
 
-    assert fake.closed is True
-    assert _twaky_db._pool is None
+    assert fake.close_called is False, (
+        "regression: _dispose_inherited_pool() called .close() on the pool. "
+        "That would send PQfinish to Postgres and kill parent-side sessions."
+    )
+    assert _twaky_db._pool is None, "module reference must be cleared"
 
 
 def test_dispose_inherited_pool_no_op_when_pool_missing(monkeypatch):
@@ -39,19 +48,6 @@ def test_dispose_inherited_pool_no_op_when_pool_missing(monkeypatch):
     from twaky import db as _twaky_db
 
     monkeypatch.setattr(_twaky_db, "_pool", None)
-    _dispose_inherited_pool()  # must not raise
-    assert _twaky_db._pool is None
-
-
-def test_dispose_inherited_pool_swallows_close_errors(monkeypatch):
-    """A raising .close() must not propagate — child startup must remain robust."""
-    from twaky import db as _twaky_db
-
-    class _RaisingPool:
-        def close(self):
-            raise RuntimeError("cannot close")
-
-    monkeypatch.setattr(_twaky_db, "_pool", _RaisingPool())
     _dispose_inherited_pool()  # must not raise
     assert _twaky_db._pool is None
 
