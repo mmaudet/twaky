@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import patch
 from uuid import UUID, uuid4
@@ -236,7 +237,6 @@ class TestPatchSkill:
         sk = _fake_skill("echo")
         updated = _fake_skill("echo", skill_id=sk.id)
         # Return a skill with an updated description
-        from dataclasses import replace
 
         updated = replace(updated, description="new")
         with patch("twaky.api.routers.skills.repository.update", return_value=updated):
@@ -282,7 +282,6 @@ class TestPatchSkill:
         config_values patched without config_schema still validates against
         the current schema (not {} which would accept anything)."""
         client = _owner_client(monkeypatch)
-        from dataclasses import replace
 
         existing = replace(
             _fake_skill("echo"),
@@ -369,7 +368,6 @@ class TestSkillTestEndpoint:
     def test_test_endpoint_error_outcome(self, monkeypatch):
         client = _owner_client(monkeypatch)
         sk = _fake_skill("raiser")
-        from dataclasses import replace
 
         sk = replace(sk, python_source="def run(**kw):\n    raise ValueError('nope')")
         with patch("twaky.api.routers.skills.repository.get", return_value=sk):

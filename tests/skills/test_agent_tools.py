@@ -71,6 +71,9 @@ def test_multiple_collisions_dropped_and_warned(caplog):
         merged = agent_tools.merged_tools_for("atlas", builtins)
     assert [t.name for t in merged] == ["finish_mission", "delegate_to_plume", "ok"]
     assert "dropped 2 skill(s)" in caplog.text
+    # Also pin the agent_id in the warning — regression guard against a
+    # future log-format change that could obscure WHICH agent had the drop.
+    assert "agent=atlas" in caplog.text
 
 
 def test_no_skills_returns_builtins_unchanged():

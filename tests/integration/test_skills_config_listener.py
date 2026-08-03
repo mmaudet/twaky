@@ -22,7 +22,7 @@ def _clean_skills():
         cur.execute("DELETE FROM skill")
 
 
-async def test_notify_invalidates_registry_cache_within_1s(monkeypatch):
+async def test_notify_invalidates_registry_cache_within_1s():
     # Warm the cache so we can detect its clearing.
     registry.invalidate_all()
     registry._cache["atlas"] = []  # type: ignore[attr-defined]

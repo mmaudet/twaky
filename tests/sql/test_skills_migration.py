@@ -44,6 +44,10 @@ def test_declares_notify_trigger_on_all_dml():
     text = SCRIPT.read_text()
     assert "pg_notify('skill_changed'" in text
     assert "AFTER INSERT OR UPDATE OR DELETE ON public.skill" in text
+    # Payload contract per spec §12: COALESCE(NEW.id::text, OLD.id::text, 'ALL')
+    # — must survive both INSERT (NEW present) and DELETE (only OLD) paths.
+    # Listeners strip parse payload; drift here would silently break invalidation.
+    assert "COALESCE(NEW.id::text, OLD.id::text, 'ALL')" in text
 
 
 def test_declares_updated_at_trigger():

@@ -24,9 +24,6 @@ class SkillNameConflict(Exception):
     pass
 
 
-_UNIQUE_NAME_CONSTRAINT = "skill_name_key"
-
-
 def _row_to_skill(row: dict[str, Any]) -> Skill:
     return Skill(
         id=row["id"],

@@ -46,6 +46,13 @@ def skill_to_tool(skill: Skill) -> StructuredTool:
         name=skill.name,
         description=skill.description,
         func=_invoke,
+        # Raw JSON Schema dict — accepted per
+        # ``langchain_core.tools.base.py`` ArgsSchema = ``TypeBaseModel |
+        # dict[str, Any]``. Bypasses LangChain's auto-derivation from
+        # ``_invoke``'s signature: default derivation introspects
+        # ``**kwargs``, generates a synthetic ``kwargs`` field, and then
+        # STRIPS that field back out in ``_parse_input`` (base.py:843) —
+        # ``_invoke`` receives an empty dict on every call. Do not remove.
         args_schema={"type": "object", "additionalProperties": True},
     )
 
