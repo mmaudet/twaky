@@ -34,12 +34,38 @@ log = structlog.get_logger("twaky.atlas_daemon")
 
 
 def _claim_declared(owner_email: str) -> UUID | None:
-    """Claim the oldest declared mission, returning its id or None."""
+    """Atomically claim the oldest DECLARED mission and transition it to PLANNING.
+
+    Returns the mission id if a row was claimed, else None.
+
+    The claim happens in a single UPDATE...RETURNING statement to close a
+    race: previously, this method did SELECT ... FOR UPDATE SKIP LOCKED
+    then COMMIT, releasing the lock while the row was still 'declared'.
+    Two concurrent NOTIFY (or NOTIFY + periodic sweep) both saw the row
+    as claimable, both scheduled _run_mission_sync, both called
+    engine.start_planning — the second crashing with
+    InvalidTransition('planning → planning').
+
+    With the atomic claim, only one worker's UPDATE can affect the row;
+    the second gets 0 rows back and returns None.
+
+    Note: this bypasses the engine._transition path (langfuse span, state
+    check), which is acceptable here because:
+      * transition legality is fixed (declared → planning, always).
+      * the mission_changed NOTIFY still fires (DB trigger).
+      * the DECLARED → PLANNING span is short-lived and low-signal.
+    """
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT id FROM mission "
-            "WHERE state = 'declared' AND owner_email = %s "
-            "ORDER BY declared_at LIMIT 1 FOR UPDATE SKIP LOCKED",
+            "UPDATE mission "
+            "SET state = 'planning', updated_at = now() "
+            "WHERE id = ("
+            "  SELECT id FROM mission "
+            "  WHERE state = 'declared' AND owner_email = %s "
+            "  ORDER BY declared_at LIMIT 1 "
+            "  FOR UPDATE SKIP LOCKED"
+            ") "
+            "RETURNING id",
             (owner_email,),
         )
         row = cur.fetchone()
@@ -85,11 +111,15 @@ def _last_finish_marker(state: dict) -> tuple[str, str] | None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-async def _bounded_run(sem: asyncio.Semaphore, mid: UUID) -> None:
+async def _bounded_run(
+    sem: asyncio.Semaphore, mid: UUID, *, is_fresh_claim: bool = False
+) -> None:
     async with sem:
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(_run_mission_sync, mid),
+                asyncio.to_thread(
+                    _run_mission_sync, mid, is_fresh_claim=is_fresh_claim
+                ),
                 timeout=settings.atlas_mission_timeout_s,
             )
         except TimeoutError:
@@ -121,12 +151,18 @@ async def _bounded_run(sem: asyncio.Semaphore, mid: UUID) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def _run_mission_sync(mid: UUID) -> None:
+def _run_mission_sync(mid: UUID, *, is_fresh_claim: bool = False) -> None:
     """Blocking mission driver — called via asyncio.to_thread.
 
-    Handles both fresh (DECLARED) missions and resumed
-    (RUNNING / AWAITING_USER) missions after a daemon restart or
-    user-response notification.
+    Handles both fresh (DECLARED, atomically claimed to PLANNING) missions
+    and resumed (RUNNING / AWAITING_USER) missions after a daemon restart
+    or user-response notification.
+
+    ``is_fresh_claim`` distinguishes the two paths that both see PLANNING:
+      * True: caller just came from _claim_declared → the atomic UPDATE
+        transitioned DECLARED → PLANNING; commit the plan and invoke.
+      * False (default): boot recovery of a PLANNING mission that crashed
+        before graph.invoke ever ran → auto-fail with checkpoint_lost.
     """
     m = repository.get(mid)
     if m is None:
@@ -136,10 +172,11 @@ def _run_mission_sync(mid: UUID) -> None:
     graph = build_atlas_agent(checkpointer=get_checkpointer())
     config = {"configurable": {"thread_id": str(mid)}}
 
-    if m.state == MissionState.PLANNING:
-        # A PLANNING mission's checkpoint has no useful LangGraph state
-        # (planning hasn't reached graph.invoke yet). Auto-fail with a
-        # descriptive reason rather than start_planning() → InvalidTransition.
+    if m.state == MissionState.PLANNING and not is_fresh_claim:
+        # Boot recovery of a PLANNING mission: its LangGraph checkpoint
+        # never got a chance to be written (planning hasn't reached
+        # graph.invoke yet). Auto-fail with a descriptive reason rather
+        # than start_planning() → InvalidTransition.
         engine.finish(
             mid,
             outcome="failed",
@@ -151,8 +188,14 @@ def _run_mission_sync(mid: UUID) -> None:
     is_resume = m.state in (MissionState.RUNNING, MissionState.AWAITING_USER)
 
     if not is_resume:
-        # Fresh mission: run through the planning transitions first.
-        engine.start_planning(mid)
+        # Fresh mission. Two entry paths converge here:
+        #   * Production: _claim_declared already atomically transitioned
+        #     DECLARED → PLANNING. Skip start_planning (idempotent no-op
+        #     the state machine rejects) and go straight to commit_plan.
+        #   * Test/direct call: caller passes a DECLARED mission without
+        #     the atomic claim path. Do the transition manually.
+        if m.state == MissionState.DECLARED:
+            engine.start_planning(mid)
         plan = [PlanStep(agent="atlas", tool="orchestrate", args={})]
         engine.commit_plan(mid, plan)
 
@@ -268,7 +311,8 @@ def _schedule_declared_loop(sem: asyncio.Semaphore, tasks: set[asyncio.Task]) ->
         mid = _claim_declared(settings.twaky_owner_email)
         if mid is None:
             break
-        t = asyncio.create_task(_bounded_run(sem, mid))
+        # Fresh claim: _claim_declared already transitioned DECLARED → PLANNING.
+        t = asyncio.create_task(_bounded_run(sem, mid, is_fresh_claim=True))
         tasks.add(t)
         t.add_done_callback(tasks.discard)
 

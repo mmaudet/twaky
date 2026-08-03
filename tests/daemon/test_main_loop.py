@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from twaky.daemon import atlas_daemon
+from twaky.missions.models import MissionState
 
 
 @pytest.mark.asyncio
@@ -47,6 +48,12 @@ async def test_bounded_run_drives_mission_to_finish(monkeypatch):
         m.id = mid
         m.owner_email = "a@x"
         m.intent_text = "test"
+        # State must be a real enum member — _run_mission_sync now
+        # dispatches on state (DECLARED → start_planning, PLANNING → skip
+        # because _claim_declared already did the transition) to close
+        # the race in _claim_declared (see docstring). This test drives
+        # the DECLARED-entry path (no claim call, direct _bounded_run).
+        m.state = MissionState.DECLARED
         repo.get.return_value = m
         sem = asyncio.Semaphore(1)
         await atlas_daemon._bounded_run(sem, mid)
