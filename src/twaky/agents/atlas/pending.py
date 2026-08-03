@@ -19,9 +19,26 @@ from typing import Any
 
 
 def extract_pending_from_output(state: dict) -> dict | None:
-    """Walk the last few messages, return the first pending_user_input found."""
+    """Return the latest pending_user_input JSON in the message history,
+    UNLESS the user has already responded to it.
+
+    Walks the last 6 messages. Finds the newest message whose content is a
+    JSON dict with a ``pending_user_input`` field. If a ``HumanMessage``
+    (``msg.type == "human"``) appears after that pending JSON in the same
+    window, the user has already answered (engine.resume injects the
+    user_response as a HumanMessage seed on the next graph.invoke) — the
+    pending is stale and must NOT re-trigger awaiting_user.
+
+    Without this guard, resumed missions loop: the LLM finishes with a
+    finish_mission marker, but the pending JSON is still in message
+    history, so this helper re-fires request_user_input and the mission
+    bounces back to awaiting_user forever.
+    """
     msgs = state.get("messages", []) or []
-    for m in reversed(msgs[-6:]):
+    window = msgs[-6:]
+    latest_pending: dict | None = None
+    latest_pending_idx: int = -1
+    for idx, m in enumerate(window):
         content: Any = getattr(m, "content", "")
         if not isinstance(content, str) or not content:
             continue
@@ -32,8 +49,16 @@ def extract_pending_from_output(state: dict) -> dict | None:
         if isinstance(parsed, dict) and isinstance(
             parsed.get("pending_user_input"), dict
         ):
-            return parsed["pending_user_input"]
-    return None
+            latest_pending = parsed["pending_user_input"]
+            latest_pending_idx = idx
+    if latest_pending is None:
+        return None
+    # A HumanMessage after the pending means the user already responded
+    # (engine.resume seeded it) — the pending is stale.
+    for later in window[latest_pending_idx + 1 :]:
+        if getattr(later, "type", "") == "human":
+            return None
+    return latest_pending
 
 
 __all__ = ["extract_pending_from_output"]
