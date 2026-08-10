@@ -358,7 +358,7 @@ Then restart `twaky-sentinel` to pick up the new tables.
 ### JMAP token capture
 
 Plume (the JMAP agent) obtains an access token via OIDC token exchange.
-See **spec §11** for the full capture procedure; in short you need
+See **spec §11.5** for the full capture procedure; in short you need
 `JMAP_BEARER_TOKEN` in `.env` pointing to a long-lived JMAP bearer
 token for the owner's account, and `JMAP_SESSION_URL` pointing to the
 JMAP session endpoint (e.g. `https://jmap.${BASE_DOMAIN}/jmap/session`).
