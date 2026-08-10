@@ -953,6 +953,15 @@ def _terminate(
             },
         )
 
+    # Per spec §5.3: newsletter node returns only spam_bucket + spam_decision_id
+    # (pipeline continues; actions_applied would conflict with downstream nodes).
+    # Terminal buckets (spam, phishing-alert) include actions_applied to surface
+    # what the sentinel did (pipeline ends, no downstream node overwrites this).
+    if bucket == "newsletter":
+        return {
+            "spam_bucket": bucket,
+            "spam_decision_id": decision_id,
+        }
     return {
         "spam_bucket": bucket,
         "spam_decision_id": decision_id,

@@ -278,7 +278,14 @@ class TestSpamTriageStage3:
             result = node(_state(email))  # type: ignore[arg-type]
 
         mock_llm.assert_not_called()
+        # Per spec §5.3: newsletter returns only {spam_bucket, spam_decision_id}
         assert result["spam_bucket"] == "newsletter"
+        assert result["spam_decision_id"] is not None
+        assert "actions_applied" not in result, (
+            "newsletter return dict must NOT include actions_applied (spec §5.3)"
+        )
+        # Exactly two keys
+        assert set(result.keys()) == {"spam_bucket", "spam_decision_id"}
 
         decision = sd_store.get(result["spam_decision_id"])  # type: ignore[arg-type]
         assert decision is not None
@@ -451,3 +458,53 @@ class TestSpamTriageLlmNotCalledWhenNoGreyZone:
 
         mock_llm.assert_not_called()
         assert result["spam_bucket"] == "spam"
+
+
+class TestNewsletterReturnShape:
+    def test_newsletter_bucket_return_omits_actions_applied(self) -> None:
+        """Newsletter bucket return dict must match spec §5.3 exactly.
+
+        Spec §5.3 table: newsletter node returns only
+        {"spam_bucket": "newsletter", "spam_decision_id": UUID}.
+        The actions_applied key must be absent — newsletter continues through
+        the pipeline and downstream nodes (apply_actions) may write to
+        actions_applied; including it here would conflict.
+
+        Uses Stage 4 LLM path (greylist → LLM returns newsletter) to exercise
+        _terminate with bucket=newsletter from a different code path than Stage 3.
+        """
+        ctx = _ctx()
+        email = _email(
+            headers=[
+                {
+                    "name": "org.apache.james.rspamd.status",
+                    "value": "default: action=greylist; score=4.0",
+                }
+            ]
+        )
+        node = make_spam_triage(ctx)
+
+        llm_output = SpamCheckOutput(
+            bucket="newsletter",
+            confidence=0.80,
+            reason="newsletter confirmed by LLM",
+        )
+
+        with patch(
+            "twaky.sentinels.mail.nodes.structured_call", return_value=llm_output
+        ):
+            result = node(_state(email))  # type: ignore[arg-type]
+
+        # Return shape must be exactly {spam_bucket, spam_decision_id} per spec §5.3
+        assert result["spam_bucket"] == "newsletter"
+        assert result["spam_decision_id"] is not None
+        assert "actions_applied" not in result, (
+            "newsletter return dict must NOT include actions_applied (spec §5.3)"
+        )
+        assert set(result.keys()) == {"spam_bucket", "spam_decision_id"}
+
+        # Adapter side-effects still happen (label + nonjunk keyword)
+        adapter: InMemoryMailAdapter = ctx.mail  # type: ignore[assignment]
+        assert "newsletter" in adapter._labels.get("e1", [])
+        assert adapter._keywords.get("e1", {}).get("nonjunk") is True
+        ctx.base.mission_emitter.emit.assert_not_called()
