@@ -1027,6 +1027,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/auth:
+    get:
+      tags:
+      - mail-sentinel-auth
+      summary: Get Auth Status
+      description: 'Return the current OAuth connection status for the mail sentinel.
+
+
+        Returns ``connected=false`` with all nullable fields as ``null`` when no
+
+        credential row exists. Returns ``connected=true`` plus the stored metadata
+
+        fields when a credential row is present (access/refresh tokens are NOT
+
+        included in the response — only metadata).'
+      operationId: get_auth_status_mail_sentinel_auth_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthStatus'
+    delete:
+      tags:
+      - mail-sentinel-auth
+      summary: Delete Auth
+      description: 'Delete the OAuth credential for the mail sentinel.
+
+
+        Idempotent: silently succeeds if no credential row exists.
+
+        The delete trigger fires a NOTIFY on ``oauth_credential_changed`` so the
+
+        in-process sentinel stops polling until the owner reconnects.'
+      operationId: delete_auth_mail_sentinel_auth_delete
+      responses:
+        '204':
+          description: Successful Response
+  /mail-sentinel/auth/refresh:
+    post:
+      tags:
+      - mail-sentinel-auth
+      summary: Refresh Auth
+      description: 'Force an immediate token refresh and return the updated auth status.
+
+
+        Returns 409 with code ``oauth_credential_not_found`` if no credential row
+
+        exists. Returns 502 with code ``refresh_failed`` if the token endpoint
+
+        rejects the refresh (e.g. ``invalid_grant``).'
+      operationId: refresh_auth_mail_sentinel_auth_refresh_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthStatus'
 components:
   schemas:
     Agent:
@@ -1142,6 +1202,53 @@ components:
       type: object
       title: AgentUpdate
       description: Partial update. All fields optional; empty body → 422 (see router).
+    AuthStatus:
+      properties:
+        connected:
+          type: boolean
+          title: Connected
+        provider:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Provider
+        account_email:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Account Email
+        account_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Account Name
+        session_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Session Url
+        access_token_expires_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Access Token Expires At
+        last_refresh_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Refresh At
+        last_refresh_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Refresh Error
+      additionalProperties: false
+      type: object
+      required:
+      - connected
+      title: AuthStatus
     CancelBody:
       properties:
         reason:

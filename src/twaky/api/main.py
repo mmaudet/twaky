@@ -17,6 +17,7 @@ from twaky.api.routers import (
     events,
     health,
     mail_sentinel,
+    mail_sentinel_auth,
     me,
     missions,
     oauth,
@@ -67,6 +68,7 @@ app.include_router(agents.router)
 app.include_router(skills.router)
 app.include_router(sentinels.router)
 app.include_router(mail_sentinel.router)
+app.include_router(mail_sentinel_auth.router)
 
 register_exception_handlers(app)
 
