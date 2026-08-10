@@ -393,6 +393,30 @@ without a restart.
 | `SENTINEL_MAX_CONCURRENT_EVENTS` | 4 | Bounded concurrency |
 | `SENTINEL_RUN_RETENTION_DAYS` | 30 | Prune old sentinel_run rows |
 
+### Evals
+
+Three YAML fixtures under `tests/evals/mail/` cover the mail pipeline
+end-to-end using a deterministic fake LLM (no network calls):
+
+| Fixture | Email type | Expected outcome |
+|---|---|---|
+| `spam_archive.yaml` | Newsletter-style email | `archive` action applied |
+| `invoice_label.yaml` | Invoice notification | `label:invoice` action applied |
+| `meeting_request_draft.yaml` | Meeting request | Draft reply saved |
+
+**Run offline (CI default):**
+
+```bash
+TWAKY_PG_HOST=172.27.0.33 uv run pytest tests/evals -v
+```
+
+**Run against a real LLM** (opt-in, deferred to SP6b when `EVAL_LIVE=1`
+support lands):
+
+```bash
+EVAL_LIVE=1 TWAKY_PG_HOST=172.27.0.33 uv run pytest tests/evals -v
+```
+
 ## Quickstart
 
 ```bash

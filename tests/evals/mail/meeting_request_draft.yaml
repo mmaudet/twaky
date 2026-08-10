@@ -1,0 +1,27 @@
+name: meeting-request-draft
+
+rule:
+  name: draft-meeting-reply
+  conditions:
+    - field: subject
+      operator: contains
+      value: "meeting"
+  combinator: OR
+  actions:
+    - draft_reply
+
+email:
+  id: "meet-001"
+  threadId: "thread-meet-001"
+  from:
+    - email: "alice@partner.example.com"
+  to:
+    - email: "me@example.com"
+  subject: "Meeting request: Q3 review sync"
+  preview: "Hi, I'd like to schedule a meeting to discuss Q3 results. Are you available next week?"
+  receivedAt: "2026-08-10T10:30:00Z"
+
+expected:
+  outcome: draft
+  contains_action: null
+  has_draft: true

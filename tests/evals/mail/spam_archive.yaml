@@ -1,0 +1,27 @@
+name: spam-archive
+
+rule:
+  name: archive-newsletter
+  conditions:
+    - field: subject
+      operator: contains
+      value: "newsletter"
+  combinator: OR
+  actions:
+    - archive
+
+email:
+  id: "spam-001"
+  threadId: "thread-spam-001"
+  from:
+    - email: "noreply@weeklydigest.example.com"
+  to:
+    - email: "me@example.com"
+  subject: "Your Weekly Newsletter — August 2026"
+  preview: "Here are the top stories for the week of August 10, 2026..."
+  receivedAt: "2026-08-10T08:00:00Z"
+
+expected:
+  outcome: archive
+  contains_action: "archive"
+  has_draft: false

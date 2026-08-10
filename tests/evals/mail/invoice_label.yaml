@@ -1,0 +1,27 @@
+name: invoice-label
+
+rule:
+  name: label-invoice
+  conditions:
+    - field: subject
+      operator: contains
+      value: "invoice"
+  combinator: OR
+  actions:
+    - "label:invoice"
+
+email:
+  id: "inv-001"
+  threadId: "thread-inv-001"
+  from:
+    - email: "billing@acme-corp.example.com"
+  to:
+    - email: "me@example.com"
+  subject: "Invoice #INV-2026-0810 from Acme Corp"
+  preview: "Please find your invoice for services rendered in July 2026 attached."
+  receivedAt: "2026-08-10T09:15:00Z"
+
+expected:
+  outcome: static
+  contains_action: "label:invoice"
+  has_draft: false
