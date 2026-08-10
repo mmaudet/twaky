@@ -22,8 +22,9 @@ Protocol outline (spec §4.5.2 + §11):
 7. Persist ``newState``; sleep ``poll_interval_s`` (interruptible via
    ``stop_event``).
 
-On HTTP 401 (bearer expired): log an error, sleep, retry.  Auto-refresh is
-deferred to SP6b.
+On HTTP 401 (bearer expired): call ``force_refresh()`` on the manager and
+retry once.  If still 401, log an error, record it in the oauth repository,
+sleep, and continue the outer loop.
 """
 
 from __future__ import annotations
@@ -35,6 +36,8 @@ from typing import Any
 
 import httpx
 
+from twaky.oauth import repository as oauth_repository
+from twaky.oauth.refresh_manager import RefreshManager, get_manager
 from twaky.sentinels import repository
 from twaky.sentinels.base import Event
 from twaky.sentinels.sources.base import Ack, EventSource, _noop_ack
@@ -74,8 +77,10 @@ class JmapPollingEventSource(EventSource):
     session_url:
         Full URL of the JMAP session endpoint (e.g.
         ``https://jmap-new.linagora.com/jmap/session``).
-    bearer_token:
-        OIDC access token sent in the ``Authorization: Bearer`` header.
+    refresh_manager:
+        Optional ``RefreshManager`` instance.  Defaults to
+        ``get_manager(sentinel_name)`` when ``None``.  Pass an explicit
+        instance in tests to inject a mock.
     account_email:
         The email address associated with the JMAP account (informational;
         not used in the protocol but useful for logging).
@@ -102,14 +107,18 @@ class JmapPollingEventSource(EventSource):
         *,
         sentinel_name: str,
         session_url: str,
-        bearer_token: str,
+        refresh_manager: RefreshManager | None = None,
         account_email: str,
         mailbox_name: str = "INBOX",
         poll_interval_s: int = 60,
     ) -> None:
         self._sentinel_name = sentinel_name
         self._session_url = session_url
-        self._bearer_token = bearer_token
+        self._manager = (
+            refresh_manager
+            if refresh_manager is not None
+            else get_manager(sentinel_name)
+        )
         self._account_email = account_email
         self._mailbox_name = mailbox_name
         self._poll_interval_s = poll_interval_s
@@ -117,6 +126,14 @@ class JmapPollingEventSource(EventSource):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    async def _auth_headers(self) -> dict[str, str]:
+        """Build per-request Authorization headers with a fresh token."""
+        token = await self._manager.get_access_token()
+        return {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
 
     async def _discover_session(
         self, client: httpx.AsyncClient
@@ -127,8 +144,9 @@ class JmapPollingEventSource(EventSource):
         Step 2: POST apiUrl Mailbox/get → find the inbox mailbox id.
         """
         # Step 1: session
-        resp = client.build_request("GET", self._session_url)
-        session_resp = await client.send(resp)
+        headers = await self._auth_headers()
+        req = client.build_request("GET", self._session_url, headers=headers)
+        session_resp = await client.send(req)
         session_resp.raise_for_status()
         session = session_resp.json()
 
@@ -150,7 +168,8 @@ class JmapPollingEventSource(EventSource):
                 ]
             ],
         }
-        mbox_resp = await client.post(api_url, json=mailbox_body)
+        mbox_headers = await self._auth_headers()
+        mbox_resp = await client.post(api_url, json=mailbox_body, headers=mbox_headers)
         mbox_resp.raise_for_status()
         mbox_data = mbox_resp.json()
 
@@ -207,7 +226,8 @@ class JmapPollingEventSource(EventSource):
                 ]
             ],
         }
-        resp = await client.post(api_url, json=body)
+        headers = await self._auth_headers()
+        resp = await client.post(api_url, json=body, headers=headers)
         resp.raise_for_status()
         data = resp.json()
         query_state: str = data["methodResponses"][0][1]["queryState"]
@@ -236,7 +256,8 @@ class JmapPollingEventSource(EventSource):
                 ]
             ],
         }
-        resp = await client.post(api_url, json=body)
+        headers = await self._auth_headers()
+        resp = await client.post(api_url, json=body, headers=headers)
         resp.raise_for_status()
         data = resp.json()
         result = data["methodResponses"][0][1]
@@ -269,7 +290,8 @@ class JmapPollingEventSource(EventSource):
                 ]
             ],
         }
-        resp = await client.post(api_url, json=body)
+        headers = await self._auth_headers()
+        resp = await client.post(api_url, json=body, headers=headers)
         resp.raise_for_status()
         data = resp.json()
         result = data["methodResponses"][0][1]
@@ -295,6 +317,53 @@ class JmapPollingEventSource(EventSource):
         repository.update_config_value(self._sentinel_name, "jmap_last_state", state)
 
     # ------------------------------------------------------------------
+    # Internal: 401-aware HTTP helper
+    # ------------------------------------------------------------------
+
+    async def _call_with_401_retry(
+        self,
+        coro_factory: Any,
+        stop_event: asyncio.Event,
+    ) -> Any:
+        """Call *coro_factory()*, retry once after force_refresh on 401.
+
+        If the retry also returns 401, log an error, record it in the oauth
+        repository, sleep poll_interval, and raise a ``_DoubleAuthError`` so
+        the outer loop can ``continue``.
+        """
+        try:
+            return await coro_factory()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 401:
+                raise
+            log.warning(
+                "jmap_poll[%s]: 401 on first attempt — force-refreshing token",
+                self._sentinel_name,
+            )
+            await self._manager.force_refresh()
+            # Retry once with the new token
+            try:
+                return await coro_factory()
+            except httpx.HTTPStatusError as exc2:
+                if exc2.response.status_code != 401:
+                    raise
+                log.error(
+                    "jmap_poll[%s]: 401 persists after force_refresh — "
+                    "recording error and waiting %ds",
+                    self._sentinel_name,
+                    self._poll_interval_s,
+                )
+                oauth_repository.set_error(self._sentinel_name, "401_after_refresh")
+                try:
+                    await asyncio.wait_for(
+                        stop_event.wait(),
+                        timeout=float(self._poll_interval_s),
+                    )
+                except TimeoutError:
+                    pass
+                raise _DoubleAuthError from exc2
+
+    # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
 
@@ -302,25 +371,24 @@ class JmapPollingEventSource(EventSource):
         self, *, stop_event: asyncio.Event
     ) -> AsyncIterator[tuple[Event, Ack]]:  # type: ignore[override]
         """Yield ``(Event, _noop_ack)`` pairs until ``stop_event`` is set."""
-        headers = {
-            "Authorization": f"Bearer {self._bearer_token}",
-            "Content-Type": "application/json",
-        }
-        async with httpx.AsyncClient(
-            headers=headers,
-            timeout=30.0,
-        ) as client:
-            # Retry loop: re-entered only on recoverable errors (e.g. 401).
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Retry loop: re-entered only on recoverable errors (e.g. double-401).
             while not stop_event.is_set():
                 try:
                     # --- Session discovery (once per stream() call / retry) ---
-                    account_id, api_url, inbox_id = await self._discover_session(client)
+                    account_id, api_url, inbox_id = await self._call_with_401_retry(
+                        lambda _c=client: self._discover_session(_c),
+                        stop_event,
+                    )
 
                     # --- Seed (first run only) ---
                     state = self._load_state()
                     if state is None:
-                        seed = await self._seed_state(
-                            client, api_url, account_id, inbox_id
+                        seed = await self._call_with_401_retry(
+                            lambda _c=client, _u=api_url, _a=account_id, _i=inbox_id: (
+                                self._seed_state(_c, _u, _a, _i)
+                            ),
+                            stop_event,
                         )
                         self._persist_state(seed)
                         state = seed
@@ -342,13 +410,19 @@ class JmapPollingEventSource(EventSource):
 
                     # --- Delta poll loop (runs until stop_event or error) ---
                     while not stop_event.is_set():
-                        new_state, created = await self._poll_changes(
-                            client, api_url, account_id, state
+                        new_state, created = await self._call_with_401_retry(
+                            lambda _c=client, _u=api_url, _a=account_id, _s=state: (
+                                self._poll_changes(_c, _u, _a, _s)
+                            ),
+                            stop_event,
                         )
 
                         if created:
-                            emails = await self._fetch_emails(
-                                client, api_url, account_id, created
+                            emails = await self._call_with_401_retry(
+                                lambda _c=client, _u=api_url, _a=account_id, _ids=created: (
+                                    self._fetch_emails(_c, _u, _a, _ids)
+                                ),
+                                stop_event,
                             )
                             for email in emails:
                                 event: Event = {
@@ -379,14 +453,17 @@ class JmapPollingEventSource(EventSource):
                     # Inner loop exited because stop_event is set.
                     return
 
+                except _DoubleAuthError:
+                    # Already logged + recorded; outer while will re-check stop_event.
+                    continue
+
                 except httpx.HTTPStatusError as exc:
                     if exc.response.status_code == 401:
+                        # Should not reach here after _call_with_401_retry,
+                        # but guard just in case.
                         log.error(
-                            "jmap_poll[%s]: 401 Unauthorized — bearer token expired. "
-                            "Rotate JMAP_BEARER_TOKEN and restart.  "
-                            "Retrying after %ds.",
+                            "jmap_poll[%s]: unexpected 401 escaped retry logic",
                             self._sentinel_name,
-                            self._poll_interval_s,
                         )
                         try:
                             await asyncio.wait_for(
@@ -397,6 +474,10 @@ class JmapPollingEventSource(EventSource):
                             pass
                         continue
                     raise
+
+
+class _DoubleAuthError(Exception):
+    """Internal sentinel: 401 persisted after force_refresh — outer loop continues."""
 
 
 __all__ = ["JmapPollingEventSource"]
