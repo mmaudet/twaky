@@ -91,9 +91,18 @@ class Settings(BaseSettings):
     sentinel_max_concurrent_events: int = Field(default=4)
     sentinel_run_retention_days: int = Field(default=30)
 
+    # --- SP6b: JMAP OAuth ---
+    twaky_secret_key: str = Field(default="")
+    jmap_oauth_client_id: str = Field(default="twaky-mail-sentinel")
+    jmap_oauth_client_secret: str = Field(default="")
+    jmap_oauth_issuer: str = Field(default="https://auth.twake-dev.maudet.cloud")
+    jmap_oauth_scope: str = Field(default="openid profile email offline_access")
+
     # --- JMAP polling event source ---
     jmap_session_url: str = Field(default="")
-    jmap_bearer_token: str = Field(default="")
+    jmap_bearer_token: str = Field(
+        default=""
+    )  # deprecated, ignored — SP6b uses oauth_credential table instead
     jmap_account_email: str = Field(default="")
     jmap_poll_interval_s: int = Field(default=60)
 
