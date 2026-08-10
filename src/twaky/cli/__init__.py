@@ -8,11 +8,13 @@ import typer
 
 from twaky.cli.atlas import app as atlas_app
 from twaky.cli.mission import app as mission_app
+from twaky.cli.sentinel import app as sentinel_app
 from twaky.config import settings
 
 app = typer.Typer(help="Twaky — graph agentic brick for Twake.")
 app.add_typer(mission_app, name="mission")
 app.add_typer(atlas_app, name="atlas")
+app.add_typer(sentinel_app, name="sentinel")
 
 
 @app.command()

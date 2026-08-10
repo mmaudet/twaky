@@ -133,6 +133,19 @@ services:
       - "traefik.http.routers.twaky-frontend.tls.certresolver=letsencrypt"
       - "traefik.http.services.twaky-frontend.loadbalancer.server.port=3000"
 
+  twaky-sentinel:
+    <<: *python-common
+    container_name: twaky-sentinel
+    depends_on:
+      twaky-pg: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    command: ["twaky", "sentinel", "run"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
   # Interactive: not started by `docker compose up`; use
   #   docker compose run --rm twaky-agent twaky ask "..."
   twaky-agent:
