@@ -425,8 +425,118 @@ def make_learn_pattern(ctx: NodeContext) -> Callable[[MailAgentState], MailAgent
     return _node
 
 
+# ---------------------------------------------------------------------------
+# make_apply_actions — dispatches side-effects for matched rule's action list
+# ---------------------------------------------------------------------------
+
+
+def make_apply_actions(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentState]:
+    """Factory for the apply_actions node.
+
+    Reads ``rule_name`` and ``thread`` from state. Fetches the rule from the
+    store; skips silently if not found or disabled.
+
+    For each action in ``rule.actions`` dispatches the corresponding
+    side-effect:
+
+    - ``"archive"`` → ``ctx.mail.archive(email_id)``
+    - ``"mark_read"`` → ``ctx.mail.mark_read(email_id)``
+    - ``"label:<name>"`` → ``ctx.mail.label(email_id, name)``
+    - ``"notify"`` → ``ctx.base.mission_emitter.emit(...)``
+    - ``"delegate_to_atlas"`` → ``ctx.base.delegation.delegate(...)``
+    - ``"draft_reply"`` → marker only (T23 handles actual save)
+    - unknown → ``log.warning`` only, not appended to result
+
+    Returns a node function that takes the current state and returns a
+    partial state dict with ``actions_applied`` (list of executed action
+    strings).
+
+    Parameters
+    ----------
+    ctx
+        Execution context with mail adapter and base sentinel context.
+
+    Returns
+    -------
+    Callable
+        A node function ``(MailAgentState) -> MailAgentState``.
+    """
+
+    def _node(state: MailAgentState) -> MailAgentState:
+        rule_name: str | None = state.get("rule_name")
+        thread: list[dict[str, Any]] = state.get("thread") or []
+
+        # Skip conditions: rule_name missing OR thread empty
+        if not rule_name or not thread:
+            return {"actions_applied": []}
+
+        # Fetch rule from store
+        rule = rules_store.by_name(rule_name)
+        if rule is None or not rule.enabled:
+            return {"actions_applied": []}
+
+        latest = thread[-1]
+        email_id: str = latest.get("id", "")
+        subject: str = latest.get("subject", "(no subject)")
+
+        actions_applied: list[str] = []
+
+        for action in rule.actions:
+            if action == "archive":
+                ctx.mail.archive(email_id)
+                actions_applied.append("archive")
+
+            elif action == "mark_read":
+                ctx.mail.mark_read(email_id)
+                actions_applied.append("mark_read")
+
+            elif action.startswith("label:"):
+                _, label_name = action.split(":", 1)
+                ctx.mail.label(email_id, label_name)
+                actions_applied.append(action)
+
+            elif action == "notify":
+                ctx.base.mission_emitter.emit(
+                    intent_text=f"Mail: {subject}",
+                    reason=f"rule '{rule_name}' matched — please review",
+                    artifact={
+                        "kind": "sentinel_evidence",
+                        "sentinel": "mail",
+                        "evidence": {
+                            "email_id": email_id,
+                            "rule": rule_name,
+                        },
+                    },
+                )
+                actions_applied.append("notify")
+
+            elif action == "delegate_to_atlas":
+                ctx.base.delegation.delegate(
+                    intent_text=f"Handle mail: {subject}",
+                    artifact={"email_id": email_id, "rule": rule_name},
+                    timeout_s=60.0,
+                )
+                actions_applied.append("delegate_to_atlas")
+
+            elif action == "draft_reply":
+                # Marker only — T23 handles the actual draft save
+                actions_applied.append("draft_reply")
+
+            else:
+                log.warning(
+                    "apply_actions: unknown action %r in rule %r — skipping",
+                    action,
+                    rule_name,
+                )
+
+        return {"actions_applied": actions_applied}
+
+    return _node
+
+
 __all__ = [
     "NodeContext",
+    "make_apply_actions",
     "make_learn_pattern",
     "make_load_thread",
     "make_match_rules",
