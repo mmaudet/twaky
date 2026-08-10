@@ -104,6 +104,12 @@ class Settings(BaseSettings):
     plume_oidc_client_secret: str = Field(default="")
     plume_oidc_issuer: str = Field(default="")
 
+    # --- Mail sentinel LLM tiers ---
+    mail_sentinel_economy_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
+    mail_sentinel_default_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
+    mail_sentinel_chat_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
+    mail_sentinel_draft_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
+
     # --- Sub-project 3a: API ---
     api_base_url: str = Field(default="http://twaky-api:8000")
     api_session_secret: str = Field(default="")
