@@ -328,6 +328,219 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sentinels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sentinels
+         * @description Return all sentinels with 24-hour run statistics.
+         */
+        get: operations["list_sentinels_sentinels_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sentinels/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Detail
+         * @description Return the full detail for a single sentinel run.
+         */
+        get: operations["get_run_detail_sentinels_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sentinels/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sentinel
+         * @description Return the full detail for a single sentinel.
+         */
+        get: operations["get_sentinel_sentinels__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Sentinel
+         * @description Toggle enabled state or update config_values for a sentinel.
+         *
+         *     If ``config_values`` is provided, it is validated against the sentinel's
+         *     ``config_schema`` using JSON Schema Draft 2020-12 before persisting.
+         *     Returns 422 with code ``validation_failed`` on schema violations.
+         */
+        patch: operations["patch_sentinel_sentinels__name__patch"];
+        trace?: never;
+    };
+    "/sentinels/{name}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Runs
+         * @description List sentinel runs, newest first.
+         *
+         *     Accepts optional pagination parameters:
+         *     - ``limit``: 1..500 (default 100)
+         *     - ``before``: ISO-8601 timestamp cursor
+         */
+        get: operations["list_runs_sentinels__name__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail-sentinel/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Rules
+         * @description Return all rules ordered by priority ASC.
+         *
+         *     When ``enabled=true``, delegates to ``list_all(enabled_only=True)`` to
+         *     filter at the DB level.  When absent or ``enabled=false``, fetches all
+         *     rows and filters client-side so the FE can decide.
+         */
+        get: operations["list_rules_mail_sentinel_rules_get"];
+        put?: never;
+        /**
+         * Create Rule
+         * @description Create a new mail rule with full validation.
+         *
+         *     Returns 422 with code ``validation_failed`` on service-layer rejections.
+         */
+        post: operations["create_rule_mail_sentinel_rules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail-sentinel/rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Rule
+         * @description Return the full detail for a single rule.
+         */
+        get: operations["get_rule_mail_sentinel_rules__rule_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Rule
+         * @description Delete a rule by id. Returns 404 if not found.
+         */
+        delete: operations["delete_rule_mail_sentinel_rules__rule_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Patch Rule
+         * @description Apply a partial patch to a rule.
+         *
+         *     Returns 422 with ``validation_failed`` on empty body or invalid fields.
+         *     Returns 404 with ``mail_rule_not_found`` if the rule does not exist.
+         */
+        patch: operations["patch_rule_mail_sentinel_rules__rule_id__patch"];
+        trace?: never;
+    };
+    "/mail-sentinel/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Memories
+         * @description Return recently created memories, optionally filtered by scope.
+         */
+        get: operations["list_memories_mail_sentinel_memories_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail-sentinel/learned-patterns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Learned Patterns
+         * @description Return all learned patterns, optionally filtered to active ones.
+         */
+        get: operations["list_learned_patterns_mail_sentinel_learned_patterns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail-sentinel/learned-patterns/{sender_email}/{rule_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Forget Pattern
+         * @description Forget a learned pattern. Silently succeeds even if the row does not exist.
+         */
+        delete: operations["forget_pattern_mail_sentinel_learned_patterns__sender_email___rule_name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -412,6 +625,197 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * LearnedPatternSummary
+         * @description Summary of a mail_sentinel_learned_pattern row.
+         */
+        LearnedPatternSummary: {
+            /** Id */
+            id: string;
+            /** Sender Email */
+            sender_email: string;
+            /** Rule Name */
+            rule_name: string;
+            /** Confidence */
+            confidence: number;
+            /** Evidence Count */
+            evidence_count: number;
+            /**
+             * First Seen
+             * Format: date-time
+             */
+            first_seen: string;
+            /**
+             * Last Confirmed
+             * Format: date-time
+             */
+            last_confirmed: string;
+            /** Is Active */
+            is_active: boolean;
+        };
+        /**
+         * MailMemorySummary
+         * @description Summary of a mail_sentinel_memory row (evidence omitted).
+         */
+        MailMemorySummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Scope */
+            scope: string;
+            /** Scope Value */
+            scope_value: string;
+            /** Content */
+            content: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /**
+         * MailRuleCreate
+         * @description Payload for POST /mail-sentinel/rules.
+         */
+        MailRuleCreate: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Conditions
+             * @default []
+             */
+            conditions: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Combinator
+             * @default OR
+             */
+            combinator: string;
+            /** Actions */
+            actions: string[];
+            /**
+             * Priority
+             * @default 100
+             */
+            priority: number;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Run On Threads
+             * @default true
+             */
+            run_on_threads: boolean;
+        };
+        /**
+         * MailRuleDetail
+         * @description Full rule row including conditions, combinator, actions, timestamps.
+         */
+        MailRuleDetail: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Priority */
+            priority: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Run On Threads */
+            run_on_threads: boolean;
+            /** Action Count */
+            action_count: number;
+            /** Condition Count */
+            condition_count: number;
+            /** Conditions */
+            conditions: {
+                [key: string]: unknown;
+            }[];
+            /** Combinator */
+            combinator: string;
+            /** Actions */
+            actions: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * MailRulePatch
+         * @description Partial update payload for PATCH /mail-sentinel/rules/{id}.
+         */
+        MailRulePatch: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Conditions */
+            conditions?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Combinator */
+            combinator?: string | null;
+            /** Actions */
+            actions?: string[] | null;
+            /** Priority */
+            priority?: number | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Run On Threads */
+            run_on_threads?: boolean | null;
+        };
+        /**
+         * MailRuleSummary
+         * @description Shallow representation used in the rules list endpoint.
+         */
+        MailRuleSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Priority */
+            priority: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Run On Threads */
+            run_on_threads: boolean;
+            /** Action Count */
+            action_count: number;
+            /** Condition Count */
+            condition_count: number;
+        };
         /** Mission */
         Mission: {
             /**
@@ -483,6 +887,139 @@ export interface components {
             user_response: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * SentinelDetail
+         * @description Full sentinel row including config schema and values.
+         */
+        SentinelDetail: {
+            /** Name */
+            name: string;
+            /** Display Name */
+            display_name: string;
+            /** Description */
+            description: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Version */
+            version: string;
+            /** Config Schema */
+            config_schema: {
+                [key: string]: unknown;
+            };
+            /** Config Values */
+            config_values: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * SentinelPatch
+         * @description Partial update payload. Extra keys are rejected.
+         */
+        SentinelPatch: {
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Config Values */
+            config_values?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * SentinelRunDetail
+         * @description Full run record including trace and error information.
+         */
+        SentinelRunDetail: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Sentinel Name */
+            sentinel_name: string;
+            /** Event Ref */
+            event_ref: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Completed At */
+            completed_at: string | null;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "ignored" | "processed" | "mission_created" | "delegated" | "error";
+            /** Mission Id */
+            mission_id: string | null;
+            /** Llm Calls */
+            llm_calls: number;
+            /** Trace */
+            trace: {
+                [key: string]: unknown;
+            }[];
+            /** Error Repr */
+            error_repr: string | null;
+        };
+        /**
+         * SentinelRunSummary
+         * @description One row from ``sentinel_run``, without the heavy fields.
+         */
+        SentinelRunSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Sentinel Name */
+            sentinel_name: string;
+            /** Event Ref */
+            event_ref: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Completed At */
+            completed_at: string | null;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "ignored" | "processed" | "mission_created" | "delegated" | "error";
+            /** Mission Id */
+            mission_id: string | null;
+            /** Llm Calls */
+            llm_calls: number;
+        };
+        /**
+         * SentinelSummary
+         * @description Shallow representation used in the list endpoint.
+         */
+        SentinelSummary: {
+            /** Name */
+            name: string;
+            /** Display Name */
+            display_name: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Version */
+            version: string;
+            stats_24h: components["schemas"]["Stats24h"];
         };
         /** Skill */
         Skill: {
@@ -615,6 +1152,16 @@ export interface components {
             bound_agents?: ("atlas" | "chronos" | "plume" | "iris")[] | null;
             /** Enabled */
             enabled?: boolean | null;
+        };
+        /**
+         * Stats24h
+         * @description 24-hour run statistics for a sentinel.
+         */
+        Stats24h: {
+            /** Total */
+            total: number;
+            /** Errors */
+            errors: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -1260,6 +1807,409 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SkillTestResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sentinels_sentinels_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SentinelSummary"][];
+                };
+            };
+        };
+    };
+    get_run_detail_sentinels_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SentinelRunDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sentinel_sentinels__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SentinelDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_sentinel_sentinels__name__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SentinelPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SentinelDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_runs_sentinels__name__runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                before?: string | null;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SentinelRunSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_rules_mail_sentinel_rules_get: {
+        parameters: {
+            query?: {
+                enabled?: boolean | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailRuleSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_rule_mail_sentinel_rules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailRuleCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailRuleDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_rule_mail_sentinel_rules__rule_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailRuleDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_rule_mail_sentinel_rules__rule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_rule_mail_sentinel_rules__rule_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailRulePatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailRuleDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_memories_mail_sentinel_memories_get: {
+        parameters: {
+            query?: {
+                scope?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailMemorySummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_learned_patterns_mail_sentinel_learned_patterns_get: {
+        parameters: {
+            query?: {
+                active_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LearnedPatternSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forget_pattern_mail_sentinel_learned_patterns__sender_email___rule_name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sender_email: string;
+                rule_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
