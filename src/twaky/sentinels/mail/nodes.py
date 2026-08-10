@@ -23,8 +23,9 @@ from twaky.sentinels.mail.llm.hardening import Hardening
 from twaky.sentinels.mail.llm.invoke import structured_call
 from twaky.sentinels.mail.llm.tiers import UseCase
 from twaky.sentinels.mail.prompts.rules import choose_rule_prompt, learn_pattern_prompt
-from twaky.sentinels.mail.schemas import ChooseRuleOutput, LearnPatternOutput
-from twaky.sentinels.mail.state import MailAgentState
+from twaky.sentinels.mail.prompts.thread_status import thread_status_prompt
+from twaky.sentinels.mail.schemas import ChooseRuleOutput, LearnPatternOutput, ThreadStatusOutput
+from twaky.sentinels.mail.state import MailAgentState, ThreadStatus
 from twaky.sentinels.mail.store import learned_patterns as lp_store
 from twaky.sentinels.mail.store import rules as rules_store
 
@@ -534,10 +535,57 @@ def make_apply_actions(ctx: NodeContext) -> Callable[[MailAgentState], MailAgent
     return _node
 
 
+def make_thread_status(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentState]:
+    """Factory for the thread_status node.
+
+    4-way classifier for email thread status: TO_REPLY, ACTIONED, FYI, AWAITING_REPLY.
+    Uses DEFAULT tier LLM with COMPACT hardening.
+
+    If the thread is empty, returns ``{"status": ThreadStatus.FYI}`` without
+    calling the LLM. Otherwise, calls ``structured_call(thread_status_prompt(...),
+    ThreadStatusOutput, hardening=COMPACT, use_case=THREAD_STATUS)`` and returns
+    ``{"status": output.status}``.
+
+    Returns a node function that takes the current state and returns a
+    partial state dict with ``status`` key.
+
+    Parameters
+    ----------
+    ctx
+        Execution context with owner_email.
+
+    Returns
+    -------
+    Callable
+        A node function ``(MailAgentState) -> MailAgentState``.
+    """
+
+    def _node(state: MailAgentState) -> MailAgentState:
+        thread: list[dict[str, Any]] = state.get("thread") or []
+
+        # Empty thread → return FYI without LLM call
+        if not thread:
+            return {"status": ThreadStatus.FYI}
+
+        # Call LLM to classify
+        prompt = thread_status_prompt(dict(state), owner_email=ctx.owner_email)
+        output: ThreadStatusOutput = structured_call(
+            prompt,
+            ThreadStatusOutput,
+            hardening=Hardening.COMPACT,
+            use_case=UseCase.THREAD_STATUS,
+        )
+
+        return {"status": output.status}
+
+    return _node
+
+
 __all__ = [
     "NodeContext",
     "make_apply_actions",
     "make_learn_pattern",
     "make_load_thread",
     "make_match_rules",
+    "make_thread_status",
 ]
