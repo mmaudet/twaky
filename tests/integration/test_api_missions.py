@@ -29,8 +29,7 @@ pytestmark = pytest.mark.skipif(not _reachable(), reason="twaky-pg not reachable
 
 @pytest.mark.asyncio
 async def test_declare_list_detail_cancel_cycle(monkeypatch):
-    monkeypatch.setenv("API_SESSION_SECRET", "test-secret-32bytes-min-abcdefgh")
-    monkeypatch.setenv("TWAKY_OWNER_EMAIL", "alice@x")
+    monkeypatch.setattr(settings, "twaky_owner_email", "alice@x")
 
     from twaky.api.main import app
 
