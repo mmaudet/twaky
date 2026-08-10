@@ -21,6 +21,7 @@ import traceback
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from twaky.oauth.config_listener import run_oauth_config_listener
 from twaky.sentinels import repository
 from twaky.sentinels.base import Context, Event, Outcome, Sentinel
 from twaky.sentinels.config_listener import run_config_listener
@@ -80,6 +81,13 @@ class SentinelRuntime:
                 name="sentinel:config_listener",
             )
         )
+
+        # 1b. OAuth credential listener
+        oauth_listener_task = asyncio.create_task(
+            run_oauth_config_listener(self._settings.pg_dsn, stop_event=stop_event),
+            name="oauth-config-listener",
+        )
+        tasks.append(oauth_listener_task)
 
         # 2. Housekeeping
         tasks.append(
@@ -194,7 +202,6 @@ def _build_source(inst: Sentinel, ctx: Context, settings: Settings) -> EventSour
         return JmapPollingEventSource(
             sentinel_name=inst.name,
             session_url=settings.jmap_session_url,
-            bearer_token=settings.jmap_bearer_token,
             account_email=settings.jmap_account_email,
             poll_interval_s=settings.jmap_poll_interval_s,
         )

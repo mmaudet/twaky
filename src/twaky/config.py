@@ -91,9 +91,18 @@ class Settings(BaseSettings):
     sentinel_max_concurrent_events: int = Field(default=4)
     sentinel_run_retention_days: int = Field(default=30)
 
+    # --- SP6b: JMAP OAuth ---
+    twaky_secret_key: str = Field(default="")
+    jmap_oauth_client_id: str = Field(default="twaky-mail-sentinel")
+    jmap_oauth_client_secret: str = Field(default="")
+    jmap_oauth_issuer: str = Field(default="https://auth.twake-dev.maudet.cloud")
+    jmap_oauth_scope: str = Field(default="openid profile email offline_access")
+
     # --- JMAP polling event source ---
     jmap_session_url: str = Field(default="")
-    jmap_bearer_token: str = Field(default="")
+    jmap_bearer_token: str = Field(
+        default=""
+    )  # deprecated, ignored — SP6b uses oauth_credential table instead
     jmap_account_email: str = Field(default="")
     jmap_poll_interval_s: int = Field(default=60)
 
@@ -110,10 +119,25 @@ class Settings(BaseSettings):
     plume_oidc_issuer: str = Field(default="")
 
     # --- Mail sentinel LLM tiers ---
-    mail_sentinel_economy_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
-    mail_sentinel_default_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
-    mail_sentinel_chat_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
-    mail_sentinel_draft_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
+    mail_sentinel_economy_llms: str = Field(
+        default="openai/mlx-community/Qwen3-VL-8B-Instruct-4bit"
+    )
+    mail_sentinel_default_llms: str = Field(
+        default="openai/mlx-community/Qwen3-VL-8B-Instruct-4bit"
+    )
+    mail_sentinel_chat_llms: str = Field(
+        default="openai/mlx-community/Qwen3-VL-8B-Instruct-4bit"
+    )
+    mail_sentinel_draft_llms: str = Field(
+        default="openai/mlx-community/Qwen3-VL-8B-Instruct-4bit"
+    )
+
+    # --- Mail sentinel LLM endpoint override ---
+    # When non-empty, routes mail-sentinel LLM calls to an OpenAI-compatible
+    # endpoint (e.g. a local MLX server) instead of the default LiteLLM provider
+    # routing derived from the model prefix.
+    mail_sentinel_api_base: str = Field(default="")
+    mail_sentinel_api_key: str = Field(default="")
 
     # --- Sub-project 3a: API ---
     api_base_url: str = Field(default="http://twaky-api:8000")

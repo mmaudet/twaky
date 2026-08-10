@@ -12,7 +12,7 @@ no lazy discovery happens here.
 
 from __future__ import annotations
 
-import json
+from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
@@ -145,8 +145,14 @@ class JmapMailAdapter:
     ----------
     session_url:
         Stored for reference / logging; not used for requests.
-    bearer_token:
-        OIDC access token sent as ``Authorization: Bearer <token>``.
+    token_provider:
+        Sync callable returning a currently-valid OIDC access token.
+        Called before every request so tokens are always fresh.
+    refresh_now:
+        Optional sync callable that forces a token refresh (e.g.
+        ``manager.sync_force_refresh``).  Return value is ignored.
+        If provided, a 401 response triggers one call to ``refresh_now``
+        followed by a single retry.
     account_id:
         JMAP account id (pre-resolved by caller).
     api_url:
@@ -157,29 +163,31 @@ class JmapMailAdapter:
         self,
         *,
         session_url: str,
-        bearer_token: str,
+        token_provider: Callable[[], str],
+        refresh_now: Callable[[], object] | None = None,
         account_id: str,
         api_url: str,
     ) -> None:
         self.session_url = session_url
         self.account_id = account_id
         self.api_url = api_url
-        self._client = httpx.Client(
-            headers={
-                "Authorization": f"Bearer {bearer_token}",
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
-            timeout=30.0,
-        )
+        self._token_provider = token_provider
+        self._refresh_now = refresh_now
+        self._client = httpx.Client(timeout=30.0)
 
     # ------------------------------------------------------------------
     # Internal helper
     # ------------------------------------------------------------------
 
     def _call(self, method: str, args: dict[str, Any]) -> dict[str, Any]:
-        """Post a single JMAP method call and return the response args dict."""
-        body = {
+        """Post a single JMAP method call and return the response args dict.
+
+        Builds the ``Authorization`` header fresh on every call so that
+        ``token_provider`` can return a rotated token without reinitialising
+        the adapter.  On a 401 response, ``refresh_now`` is called once (if
+        provided) and the request is retried a single time.
+        """
+        payload = {
             "using": _JMAP_USING,
             "methodCalls": [
                 [
@@ -189,7 +197,20 @@ class JmapMailAdapter:
                 ]
             ],
         }
-        resp = self._client.post(self.api_url, content=json.dumps(body))
+
+        def _do_request() -> httpx.Response:
+            headers = {
+                "Authorization": f"Bearer {self._token_provider()}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            }
+            return self._client.post(self.api_url, json=payload, headers=headers)
+
+        resp = _do_request()
+        if resp.status_code == 401 and self._refresh_now is not None:
+            self._refresh_now()
+            resp = _do_request()
+
         resp.raise_for_status()
         data = resp.json()
         return data["methodResponses"][0][1]  # type: ignore[no-any-return]

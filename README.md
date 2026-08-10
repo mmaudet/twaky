@@ -355,13 +355,55 @@ docker exec -i twaky-pg bash /docker-entrypoint-initdb.d/008_init_sentinels.sh
 
 Then restart `twaky-sentinel` to pick up the new tables.
 
-### JMAP token capture
+### Sentinels · Mail — Connect JMAP account
 
-Plume (the JMAP agent) obtains an access token via OIDC token exchange.
-See **spec §11.5** for the full capture procedure; in short you need
-`JMAP_BEARER_TOKEN` in `.env` pointing to a long-lived JMAP bearer
-token for the owner's account, and `JMAP_SESSION_URL` pointing to the
-JMAP session endpoint (e.g. `https://jmap.${BASE_DOMAIN}/jmap/session`).
+The mail sentinel authenticates against your JMAP server via an OIDC
+authorization code flow managed by LemonLDAP-NG. Bearer tokens are refreshed
+automatically before every JMAP call — no manual token capture needed.
+
+**1. Register the OIDC client (operator, one-time)**
+
+In LemonLDAP-NG manager (`https://auth.${BASE_DOMAIN}/manager`) create a new
+OpenID Connect Relying Party. Full attribute table in
+[`docs/superpowers/specs/2026-08-10-sp6b-jmap-oauth-design.md §3`](docs/superpowers/specs/2026-08-10-sp6b-jmap-oauth-design.md).
+Key values: `client_id=twaky-mail-sentinel`, `refresh_token=1`,
+`additional_audiences=james`, `redirect_uri=https://twaky.${BASE_DOMAIN}/oauth/jmap/callback`.
+
+**2. Generate `TWAKY_SECRET_KEY`**
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Add the output to `.env` as `TWAKY_SECRET_KEY=...`.
+**Losing this key = losing all encrypted credentials** — store it alongside your
+other deployment secrets.
+
+**3. Set remaining env vars**
+
+In `.env` (see `.env.example` for defaults):
+
+```
+JMAP_OAUTH_CLIENT_ID=twaky-mail-sentinel
+JMAP_OAUTH_CLIENT_SECRET=<secret from LemonLDAP manager>
+JMAP_OAUTH_ISSUER=https://auth.${BASE_DOMAIN}
+JMAP_OAUTH_SCOPE=openid profile email offline_access
+JMAP_SESSION_URL=https://jmap.${BASE_DOMAIN}/jmap/session
+```
+
+**4. Connect via UI**
+
+Navigate to `/sentinels/mail` → **Auth** tab → click **Connect JMAP account**.
+Complete the OIDC redirect (LemonLDAP session reused, no login prompt if
+already logged in). The tab returns to `?tab=auth&status=connected` and shows
+**Connected as `<email>`**.
+
+**5. Token lifecycle**
+
+Access tokens refresh automatically before every JMAP call. If the
+refresh_token is revoked (e.g. LemonLDAP session expired after 30 days), the
+**Auth** tab shows `last_refresh_error`. Click **Reconnect** to repeat the
+OIDC flow and obtain a fresh token pair.
 
 ### Enabling / disabling a sentinel
 

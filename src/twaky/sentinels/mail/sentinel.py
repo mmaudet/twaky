@@ -16,6 +16,7 @@ from typing import Any, ClassVar, Literal
 import httpx
 
 from twaky.config import settings
+from twaky.oauth.refresh_manager import get_manager
 from twaky.sentinels.base import Context, Event, Outcome, Sentinel
 from twaky.sentinels.mail.adapter import JmapMailAdapter
 from twaky.sentinels.mail.nodes import NodeContext
@@ -99,7 +100,8 @@ class MailSentinel(Sentinel):
         """Resolve the JMAP session once and build a ``JmapMailAdapter``.
 
         Performs one synchronous GET to ``jmap_session_url`` to retrieve
-        ``accountId`` and ``apiUrl``.  A longer-lived cache belongs to SP6b.
+        ``accountId`` and ``apiUrl``.  Uses ``RefreshManager`` for token
+        provisioning so that expired tokens are refreshed transparently.
 
         Parameters
         ----------
@@ -107,11 +109,11 @@ class MailSentinel(Sentinel):
             Base sentinel context (unused here; kept for future caching on ctx).
         """
         session_url = settings.jmap_session_url
-        bearer_token = settings.jmap_bearer_token
+        manager = get_manager("mail")
 
         resp = httpx.get(
             session_url,
-            headers={"Authorization": f"Bearer {bearer_token}"},
+            headers={"Authorization": f"Bearer {manager.sync_get_access_token()}"},
             timeout=10.0,
         )
         resp.raise_for_status()
@@ -127,7 +129,8 @@ class MailSentinel(Sentinel):
 
         return JmapMailAdapter(
             session_url=session_url,
-            bearer_token=bearer_token,
+            token_provider=manager.sync_get_access_token,
+            refresh_now=manager.sync_force_refresh,
             account_id=account_id,
             api_url=api_url,
         )

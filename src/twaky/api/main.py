@@ -17,9 +17,11 @@ from twaky.api.routers import (
     events,
     health,
     mail_sentinel,
+    mail_sentinel_auth,
     me,
     missions,
     oauth,
+    oauth_jmap,
     sentinels,
     skills,
 )
@@ -60,11 +62,13 @@ app.include_router(health.router)
 app.include_router(me.router)
 app.include_router(missions.router)
 app.include_router(oauth.router)
+app.include_router(oauth_jmap.router)
 app.include_router(events.router)
 app.include_router(agents.router)
 app.include_router(skills.router)
 app.include_router(sentinels.router)
 app.include_router(mail_sentinel.router)
+app.include_router(mail_sentinel_auth.router)
 
 register_exception_handlers(app)
 

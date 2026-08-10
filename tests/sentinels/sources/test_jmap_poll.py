@@ -10,11 +10,12 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
+from twaky.oauth.refresh_manager import RefreshManager
 from twaky.sentinels.sources.jmap_poll import JmapPollingEventSource
 
 # ---------------------------------------------------------------------------
@@ -191,6 +192,14 @@ def _make_response(data: dict[str, Any], status: int = 200) -> httpx.Response:
     )
 
 
+def _make_401_response() -> httpx.Response:
+    return httpx.Response(
+        status_code=401,
+        headers={"content-type": "application/json"},
+        content=b'{"error": "unauthorized"}',
+    )
+
+
 def _build_transport(
     *,
     seed_ok: bool,
@@ -253,6 +262,19 @@ def _make_client_factory(transport: httpx.MockTransport):  # type: ignore[no-unt
 
 
 # ---------------------------------------------------------------------------
+# Helper: build a mock RefreshManager
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_manager(token: str = "mock-token") -> RefreshManager:
+    """Return a RefreshManager with ``get_access_token`` stubbed to *token*."""
+    mgr = RefreshManager("mail")
+    mgr.get_access_token = AsyncMock(return_value=token)  # type: ignore[method-assign]
+    mgr.force_refresh = AsyncMock(return_value=token)  # type: ignore[method-assign]
+    return mgr
+
+
+# ---------------------------------------------------------------------------
 # Test 1: seed run
 # ---------------------------------------------------------------------------
 
@@ -263,11 +285,12 @@ async def test_seeds_state_on_first_run() -> None:
     fake_state = _FakeState(initial_value=None)
     transport = _build_transport(seed_ok=True, then_changes=[])
     patched_client = _make_client_factory(transport)
+    mock_manager = _make_mock_manager()
 
     source = JmapPollingEventSource(
         sentinel_name="mail",
         session_url="https://jmap.example.com/jmap/session",
-        bearer_token="tok-test",
+        refresh_manager=mock_manager,
         account_email="user@example.com",
         poll_interval_s=1,
     )
@@ -317,11 +340,12 @@ async def test_delta_yields_one_event_and_persists_new_state() -> None:
         then_changes=[CHANGES_HAS_ONE, CHANGES_EMPTY],
     )
     patched_client = _make_client_factory(transport)
+    mock_manager = _make_mock_manager()
 
     source = JmapPollingEventSource(
         sentinel_name="mail",
         session_url="https://jmap.example.com/jmap/session",
-        bearer_token="tok-test",
+        refresh_manager=mock_manager,
         account_email="user@example.com",
         poll_interval_s=60,  # long sleep — we'll stop after the first yield
     )
@@ -350,3 +374,206 @@ async def test_delta_yields_one_event_and_persists_new_state() -> None:
     assert fake_state.value == "state-0001", (
         f"Expected persisted state 'state-0001', got {fake_state.value!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 3: 401 triggers force_refresh and retries with new token
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_401_triggers_refresh_and_retry() -> None:
+    """First session call returns 401; after force_refresh the retry succeeds.
+
+    Asserts:
+    - ``force_refresh`` was called exactly once.
+    - The second HTTP call's Authorization header contained the new token.
+    """
+    # Token sequence: "old-token" on first call; "new-token" after force_refresh.
+    mgr = RefreshManager("mail")
+    _current_token = ["old-token"]
+
+    async def _get_token() -> str:
+        return _current_token[0]
+
+    async def _do_force_refresh() -> str:
+        _current_token[0] = "new-token"
+        return "new-token"
+
+    mgr.get_access_token = _get_token  # type: ignore[method-assign]
+    mgr.force_refresh = AsyncMock(side_effect=_do_force_refresh)  # type: ignore[method-assign]
+
+    # Track which Authorization headers were sent
+    sent_auth_headers: list[str] = []
+    call_idx = 0
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_idx
+        auth = request.headers.get("authorization", "")
+        sent_auth_headers.append(auth)
+        call_idx += 1
+        if call_idx == 1:
+            # First GET /session → 401
+            resp = httpx.Response(
+                status_code=401,
+                headers={"content-type": "application/json"},
+                content=b'{"error": "unauthorized"}',
+                request=request,
+            )
+            return resp
+        # All subsequent calls succeed
+        if call_idx == 2:
+            return httpx.Response(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                content=json.dumps(SESSION_RESPONSE).encode(),
+                request=request,
+            )
+        if call_idx == 3:
+            return httpx.Response(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                content=json.dumps(MAILBOXES_RESPONSE).encode(),
+                request=request,
+            )
+        # Seed
+        if call_idx == 4:
+            return httpx.Response(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                content=json.dumps(SEED_RESPONSE).encode(),
+                request=request,
+            )
+        # Default: empty changes
+        return httpx.Response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            content=json.dumps(CHANGES_EMPTY).encode(),
+            request=request,
+        )
+
+    transport = httpx.MockTransport(_handler)
+    patched_client = _make_client_factory(transport)
+    fake_state = _FakeState(initial_value=None)
+
+    source = JmapPollingEventSource(
+        sentinel_name="mail",
+        session_url="https://jmap.example.com/jmap/session",
+        refresh_manager=mgr,
+        account_email="user@example.com",
+        poll_interval_s=1,
+    )
+
+    stop = asyncio.Event()
+
+    with (
+        patch("twaky.sentinels.sources.jmap_poll.repository", fake_state),
+        patch("twaky.sentinels.sources.jmap_poll.httpx.AsyncClient", patched_client),
+    ):
+        task = asyncio.create_task(_consume(source, stop))
+        await asyncio.sleep(0.3)
+        stop.set()
+        try:
+            await asyncio.wait_for(task, timeout=2.0)
+        except TimeoutError:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, StopAsyncIteration):
+                pass
+
+    # force_refresh called exactly once
+    mgr.force_refresh.assert_called_once()  # type: ignore[union-attr]
+
+    # Second HTTP call should carry the new token
+    assert len(sent_auth_headers) >= 2
+    assert sent_auth_headers[0] == "Bearer old-token"
+    assert sent_auth_headers[1] == "Bearer new-token"
+
+
+# ---------------------------------------------------------------------------
+# Test 4: double 401 records error in oauth repository
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_double_401_records_error() -> None:
+    """All JMAP calls return 401 → set_error('mail', '401_after_refresh') called."""
+    mgr = RefreshManager("mail")
+    mgr.get_access_token = AsyncMock(return_value="any-token")  # type: ignore[method-assign]
+    mgr.force_refresh = AsyncMock(return_value="any-token")  # type: ignore[method-assign]
+
+    call_count = 0
+
+    def _always_401(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(
+            status_code=401,
+            headers={"content-type": "application/json"},
+            content=b'{"error": "unauthorized"}',
+            request=request,
+        )
+
+    transport = httpx.MockTransport(_always_401)
+    patched_client = _make_client_factory(transport)
+    fake_state = _FakeState(initial_value=None)
+
+    # Track set_error calls
+    set_error_calls: list[tuple[str, str]] = []
+
+    fake_oauth_repo = MagicMock()
+    fake_oauth_repo.set_error = MagicMock(
+        side_effect=lambda name, err: set_error_calls.append((name, err))
+    )
+
+    source = JmapPollingEventSource(
+        sentinel_name="mail",
+        session_url="https://jmap.example.com/jmap/session",
+        refresh_manager=mgr,
+        account_email="user@example.com",
+        poll_interval_s=1,
+    )
+
+    stop = asyncio.Event()
+
+    with (
+        patch("twaky.sentinels.sources.jmap_poll.repository", fake_state),
+        patch("twaky.sentinels.sources.jmap_poll.oauth_repository", fake_oauth_repo),
+        patch("twaky.sentinels.sources.jmap_poll.httpx.AsyncClient", patched_client),
+    ):
+        task = asyncio.create_task(_consume(source, stop))
+        # Wait long enough for at least one error cycle (poll_interval_s=1)
+        await asyncio.sleep(1.5)
+        stop.set()
+        try:
+            await asyncio.wait_for(task, timeout=3.0)
+        except TimeoutError:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, StopAsyncIteration):
+                pass
+
+    # set_error should have been called at least once with the right args
+    assert any(
+        name == "mail" and err == "401_after_refresh" for name, err in set_error_calls
+    ), f"Expected set_error('mail', '401_after_refresh') call; got {set_error_calls}"
+
+
+# ---------------------------------------------------------------------------
+# Shared async helper
+# ---------------------------------------------------------------------------
+
+
+async def _consume(source: JmapPollingEventSource, stop: asyncio.Event) -> None:
+    """Drain *source.stream()* until *stop* is set."""
+    async for _event, _ack in source.stream(stop_event=stop):
+        pass
+
+
+def _next_token(it: Any) -> str:
+    try:
+        return next(it)
+    except StopIteration:
+        return "new-token"

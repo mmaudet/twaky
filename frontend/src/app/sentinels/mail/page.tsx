@@ -33,6 +33,7 @@ import { useMailRules, useDeleteMailRule, type MailRuleSummary } from '@/hooks/u
 import { useMailMemories, type MailMemorySummary } from '@/hooks/use-mail-sentinel-memories'
 import { useMailPatterns, useForgetMailPattern, type LearnedPatternSummary } from '@/hooks/use-mail-sentinel-patterns'
 import { useSentinelRuns } from '@/hooks/use-sentinels'
+import { AuthTab } from './auth-tab'
 import type { components } from '@/lib/api-types'
 
 type SentinelRunSummary = components['schemas']['SentinelRunSummary']
@@ -412,6 +413,7 @@ export default function MailSentinelPage() {
                     <TabsTrigger value="memories">Memories</TabsTrigger>
                     <TabsTrigger value="patterns">Learned Patterns</TabsTrigger>
                     <TabsTrigger value="runs">Runs</TabsTrigger>
+                    <TabsTrigger value="auth">Auth</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="rules" className="mt-4">
@@ -425,6 +427,9 @@ export default function MailSentinelPage() {
                 </TabsContent>
                 <TabsContent value="runs" className="mt-4">
                     <RunsTab />
+                </TabsContent>
+                <TabsContent value="auth" className="mt-4">
+                    <AuthTab />
                 </TabsContent>
             </Tabs>
         </div>

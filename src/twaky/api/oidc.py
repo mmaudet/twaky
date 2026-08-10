@@ -1,4 +1,4 @@
-"""authlib OAuth client factory for LemonLDAP-NG."""
+"""authlib OAuth client factory for the owner (LemonLDAP-NG) OIDC login."""
 
 from __future__ import annotations
 
