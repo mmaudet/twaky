@@ -1,0 +1,31 @@
+name: newsletter-list-unsub
+
+config_values:
+  spam_filter_enabled: true
+
+email:
+  id: "news-001"
+  threadId: null
+  from:
+    - email: "news@newsletter.example.com"
+  to:
+    - email: "me@example.com"
+  subject: "Your weekly digest — Top stories this week"
+  preview: "Here are the top stories curated for you this week. Unsubscribe at any time."
+  receivedAt: "2026-08-10T08:00:00Z"
+  keywords: {}
+  headers:
+    - name: "list-unsubscribe"
+      value: "<mailto:unsub@newsletter.example.com?subject=unsubscribe>"
+    - name: "list-unsubscribe-post"
+      value: "List-Unsubscribe=One-Click"
+    - name: "dkim-signature"
+      value: "v=1; a=rsa-sha256; d=newsletter.example.com; s=mail; ..."
+  hasAttachment: false
+
+fake_llm_outputs: {}
+
+expected:
+  bucket: "newsletter"
+  llm_called: false
+  mission_emitted: false

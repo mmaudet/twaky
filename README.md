@@ -435,16 +435,50 @@ without a restart.
 | `SENTINEL_MAX_CONCURRENT_EVENTS` | 4 | Bounded concurrency |
 | `SENTINEL_RUN_RETENTION_DAYS` | 30 | Prune old sentinel_run rows |
 
+### Recent Spam tab + Restore
+
+The mail sentinel can optionally short-circuit spam BEFORE the full LLM
+pipeline runs. Enable via /sentinels/mail#recent-spam:
+
+1. Toggle "Spam filter" ON.
+2. From now on, incoming inbox mails get classified into one of four
+   buckets:
+   - **spam**: silently labeled + $junk keyword set; stays in INBOX but
+     your existing Twake Mail filters can move it to Junk.
+   - **newsletter**: labeled `newsletter` + `nonjunk` keyword set;
+     stays in INBOX; you can create rules that match `label:newsletter`.
+   - **phishing-alert**: labeled + `$junk` + a mission is emitted for
+     your review under /missions.
+   - **none**: pass-through (unchanged pipeline).
+3. Review decisions in the Recent Spam tab; click Restore on any row
+   to clear the spam keywords (mail reappears clean in INBOX).
+
+Retention: 30 days for active decisions, 90 days for restored (audit
+trail). Owner can tune thresholds via PATCH /sentinels/mail with
+`config_values: {spam_llm_confidence_threshold: 0.90, ...}`.
+
 ### Evals
 
-Three YAML fixtures under `tests/evals/mail/` cover the mail pipeline
-end-to-end using a deterministic fake LLM (no network calls):
+Eight YAML fixtures cover the mail pipeline end-to-end using a
+deterministic fake LLM (no network calls):
+
+**SP6 pipeline fixtures** (`tests/evals/mail/`):
 
 | Fixture | Email type | Expected outcome |
 |---|---|---|
 | `spam_archive.yaml` | Newsletter-style email | `archive` action applied |
 | `invoice_label.yaml` | Invoice notification | `label:invoice` action applied |
 | `meeting_request_draft.yaml` | Meeting request | Draft reply saved |
+
+**SP6c spam-triage fixtures** (`tests/evals/mail/spam/`):
+
+| Fixture | Scenario | Expected outcome |
+|---|---|---|
+| `phishing_hard_attachment_dkim_none.yaml` | No DKIM + attachment + return-path mismatch | `phishing-alert` bucket, mission emitted |
+| `newsletter_list_unsub.yaml` | list-unsubscribe + list-unsubscribe-post headers | `newsletter` bucket, no LLM call |
+| `promo_marketing_greylist.yaml` | rspamd greylist verdict | LLM called; bucket varies |
+| `personal_reply_thread.yaml` | Thread with `nonjunk` keyword | `none` (pass-through) |
+| `ham_edge_invoice.yaml` | Automated invoice with valid DKIM | `none` (FP protection) |
 
 **Run offline (CI default):**
 

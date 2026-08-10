@@ -1,0 +1,33 @@
+name: phishing-hard-attachment-dkim-none
+
+config_values:
+  spam_filter_enabled: true
+
+email:
+  id: "phish-001"
+  threadId: null
+  from:
+    - email: "security@b-a-n-k-update.example.org"
+  to:
+    - email: "me@example.com"
+  subject: "Verify your bank account — Action required"
+  preview: "Your account has been flagged. Click here to verify your identity immediately."
+  receivedAt: "2026-08-10T07:00:00Z"
+  keywords: {}
+  headers:
+    - name: "return-path"
+      value: "<noreply@phishing-relay.ru>"
+    - name: "org.apache.james.rspamd.status"
+      value: "action=add header; score=9.5; required_score=5.0"
+  hasAttachment: true
+
+fake_llm_outputs:
+  spam_check:
+    bucket: "phishing-alert"
+    confidence: 0.95
+    reason: "No DKIM, return-path mismatch, attachment, subject uses social-engineering pattern"
+
+expected:
+  bucket: "phishing-alert"
+  llm_called: true
+  mission_emitted: true

@@ -4,6 +4,10 @@ Loads 3 YAML fixtures from this directory, seeds InMemoryMailAdapter + the
 rules store, patches ``structured_call`` with a deterministic dispatcher, and
 asserts against each fixture's ``expected`` block.
 
+Also loads 5 SP6c spam-triage fixtures from ``tests/evals/mail/spam/``.  These
+fixtures exercise the ``spam_triage`` node independently of ``match_rules`` —
+no ``rule:`` key, ``config_values.spam_filter_enabled=true``.
+
 Run offline (default, used in CI):
     uv run pytest tests/evals -v
 
@@ -15,6 +19,14 @@ Fixtures
 - spam_archive.yaml       — newsletter → archive action
 - invoice_label.yaml      — invoice notification → label:invoice action
 - meeting_request_draft.yaml — meeting request → draft_reply (draft saved)
+
+Spam fixtures (tests/evals/mail/spam/)
+---------------------------------------
+- phishing_hard_attachment_dkim_none.yaml — LLM → phishing-alert (mission)
+- newsletter_list_unsub.yaml             — heuristic → newsletter (no LLM)
+- promo_marketing_greylist.yaml          — rspamd greylist → LLM called
+- personal_reply_thread.yaml             — nonjunk keyword → bucket=none
+- ham_edge_invoice.yaml                  — FP protection → bucket=none
 """
 
 from __future__ import annotations
@@ -37,6 +49,7 @@ from twaky.sentinels.mail.schemas import (
     DraftReplyOutput,
     LearnPatternOutput,
     SelectMemoriesOutput,
+    SpamCheckOutput,
     ThreadStatusOutput,
 )
 from twaky.sentinels.mail.state import ThreadStatus
@@ -53,6 +66,9 @@ _FIXTURE_FILES = [
     _FIXTURE_DIR / "invoice_label.yaml",
     _FIXTURE_DIR / "meeting_request_draft.yaml",
 ]
+
+_SPAM_FIXTURE_DIR = _FIXTURE_DIR / "spam"
+_SPAM_FIXTURE_FILES = sorted(_SPAM_FIXTURE_DIR.glob("*.yaml"))
 
 # ---------------------------------------------------------------------------
 # DB reachability
@@ -122,7 +138,11 @@ def _build_email(email_spec: dict[str, Any]) -> dict[str, Any]:
         "to": email_spec.get("to", []),
         "subject": email_spec.get("subject", ""),
         "preview": email_spec.get("preview", ""),
-        "headers": [],
+        # Spam fixtures supply headers, keywords, hasAttachment.
+        # Original fixtures default to [] / {} / False.
+        "headers": email_spec.get("headers", []),
+        "keywords": email_spec.get("keywords", {}),
+        "hasAttachment": email_spec.get("hasAttachment", False),
     }
 
 
@@ -232,4 +252,158 @@ def test_eval_fixture(fixture_path: Path) -> None:
     else:
         assert state.get("draft") is None, (
             f"[{spec['name']}] expected no draft but got: {state.get('draft')!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# SP6c Spam-triage parametrized eval test
+# ---------------------------------------------------------------------------
+
+
+def _make_spam_ctx(
+    adapter: InMemoryMailAdapter,
+    config_values: dict[str, Any],
+    mission_mock: MagicMock,
+) -> NodeContext:
+    """Build a NodeContext seeded with the given config_values for spam tests."""
+    base = MagicMock()
+    base.sentinel_row.config_values = dict(config_values)
+    base.mission_emitter = mission_mock
+    return NodeContext(base=base, mail=adapter, owner_email="me@example.com")
+
+
+def _spam_eval_fallback(prompt: Any, schema: Any, **kwargs: Any) -> Any:
+    """Deterministic fallback for non-spam schemas in spam-eval tests.
+
+    Returns conservative outputs that keep the pipeline moving without
+    triggering draft_reply (which would emit a mission and confuse the
+    mission_emitted assertion):
+    - ``ThreadStatusOutput`` → ACTIONED (not TO_REPLY, so no draft path).
+    - Everything else → same as ``_deterministic_llm``.
+    """
+    if schema is ThreadStatusOutput:
+        return ThreadStatusOutput(status=ThreadStatus.ACTIONED)
+    return _deterministic_llm(prompt, schema, **kwargs)
+
+
+def _make_spam_llm_dispatcher(
+    fake_outputs: dict[str, Any],
+) -> Any:
+    """Return a ``structured_call`` side-effect function for spam evals.
+
+    Dispatches on schema type:
+    - ``SpamCheckOutput`` → uses ``fake_outputs["spam_check"]`` entry.
+      Increments call_count so the test can assert ``llm_called=true``.
+    - All other schemas → fall back to ``_spam_eval_fallback`` (ACTIONED,
+      no draft path, no downstream mission emit) without incrementing
+      call_count (spam_triage-only tracking).
+
+    Call count is tracked on the returned function object so the test can
+    assert ``llm_called`` (bool: at least one SpamCheckOutput call).
+    """
+    call_count: list[int] = [0]
+
+    def _dispatcher(prompt: Any, schema: Any, **kwargs: Any) -> Any:
+        if schema is SpamCheckOutput:
+            call_count[0] += 1
+            sc = fake_outputs.get("spam_check")
+            if sc is None:
+                raise AssertionError(
+                    "SpamCheckOutput called but no fake_llm_outputs.spam_check defined"
+                )
+            return SpamCheckOutput(
+                bucket=sc["bucket"],
+                confidence=sc["confidence"],
+                reason=sc["reason"],
+            )
+        # Fallback to conservative dispatcher for pipeline-continuation schemas.
+        return _spam_eval_fallback(prompt, schema, **kwargs)
+
+    _dispatcher.call_count = call_count  # type: ignore[attr-defined]
+    return _dispatcher
+
+
+@pytest.mark.parametrize(
+    "fixture_path",
+    _SPAM_FIXTURE_FILES,
+    ids=[p.stem for p in _SPAM_FIXTURE_FILES],
+)
+def test_spam_eval_fixture(fixture_path: Path) -> None:
+    """Run a single spam-triage fixture end-to-end and assert expected outcomes.
+
+    Assertions:
+    - ``state["spam_bucket"]`` matches ``expected.bucket``
+      (if ``expected.bucket`` is null, only asserts that LLM was called).
+    - ``expected.llm_called`` matches whether ``structured_call`` was invoked.
+    - ``expected.mission_emitted`` matches mission_emitter.emit call count.
+    """
+    live = os.environ.get("EVAL_LIVE", "").strip() == "1"
+    if live:
+        pytest.skip("EVAL_LIVE=1 real-LLM path not supported for spam evals")
+
+    # --- Load fixture ---
+    spec = _load_fixture(fixture_path)
+    expected = spec["expected"]
+    config_values: dict[str, Any] = spec.get("config_values", {})
+    fake_outputs: dict[str, Any] = spec.get("fake_llm_outputs") or {}
+
+    # --- Seed adapter ---
+    email = _build_email(spec["email"])
+    adapter = InMemoryMailAdapter(seed={email["id"]: email})
+
+    # --- Build context with real mission mock ---
+    mission_mock = MagicMock()
+    mission_mock.emit = MagicMock()
+    ctx = _make_spam_ctx(adapter, config_values, mission_mock)
+
+    # --- Build dispatcher + run pipeline ---
+    dispatcher = _make_spam_llm_dispatcher(fake_outputs)
+    with patch(
+        "twaky.sentinels.mail.nodes.structured_call",
+        side_effect=dispatcher,
+    ):
+        state = process_email(ctx, email["id"])
+
+    # --- Assert: spam_bucket ---
+    # The node returns Python None for the pass-through case (bucket=none).
+    # YAML `null` deserialises to Python None; YAML `none` deserialises to
+    # the string "none".  Normalise: treat the string "none" as Python None
+    # so fixture authors can write `bucket: none` naturally.
+    _raw_expected_bucket = expected.get("bucket")
+    expected_bucket = None if _raw_expected_bucket == "none" else _raw_expected_bucket
+    actual_bucket = state.get("spam_bucket")
+
+    if _raw_expected_bucket is not None:
+        # _raw_expected_bucket is not None (YAML null) → we have an assertion.
+        # Note: "none" → expected_bucket=None, and None → expected_bucket=None too.
+        assert actual_bucket == expected_bucket, (
+            f"[{spec['name']}] expected spam_bucket={expected_bucket!r} "
+            f"but got {actual_bucket!r}"
+        )
+    else:
+        # YAML null bucket means "LLM-dependent — accept any value but verify LLM was called"
+        pass
+
+    # --- Assert: LLM called (bool) ---
+    spam_llm_calls = dispatcher.call_count[0]  # type: ignore[attr-defined]
+    expected_llm_called: bool = expected.get("llm_called", False)
+    if expected_llm_called:
+        assert spam_llm_calls > 0, (
+            f"[{spec['name']}] expected LLM to be called but call_count=0"
+        )
+    else:
+        assert spam_llm_calls == 0, (
+            f"[{spec['name']}] expected NO LLM call but call_count={spam_llm_calls}"
+        )
+
+    # --- Assert: mission emitted ---
+    expected_mission_emitted: bool = expected.get("mission_emitted", False)
+    actual_emit_count: int = mission_mock.emit.call_count
+    if expected_mission_emitted:
+        assert actual_emit_count >= 1, (
+            f"[{spec['name']}] expected mission to be emitted but emit_count=0"
+        )
+    else:
+        assert actual_emit_count == 0, (
+            f"[{spec['name']}] expected NO mission emission but emit_count={actual_emit_count}"
         )
