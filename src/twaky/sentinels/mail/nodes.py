@@ -22,11 +22,13 @@ from twaky.sentinels.mail.adapter import MailAdapter
 from twaky.sentinels.mail.llm.hardening import Hardening
 from twaky.sentinels.mail.llm.invoke import structured_call
 from twaky.sentinels.mail.llm.tiers import UseCase
+from twaky.sentinels.mail.prompts.draft_reply import draft_reply_prompt
 from twaky.sentinels.mail.prompts.memories import select_memories_prompt
 from twaky.sentinels.mail.prompts.rules import choose_rule_prompt, learn_pattern_prompt
 from twaky.sentinels.mail.prompts.thread_status import thread_status_prompt
 from twaky.sentinels.mail.schemas import (
     ChooseRuleOutput,
+    DraftReplyOutput,
     LearnPatternOutput,
     SelectMemoriesOutput,
     ThreadStatusOutput,
@@ -588,7 +590,9 @@ def make_thread_status(ctx: NodeContext) -> Callable[[MailAgentState], MailAgent
     return _node
 
 
-def make_select_memories(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentState]:
+def make_select_memories(
+    ctx: NodeContext,
+) -> Callable[[MailAgentState], MailAgentState]:
     """Factory for the select_memories node.
 
     Two-stage pipeline: candidate_pool → LLM narrow.
@@ -636,9 +640,7 @@ def make_select_memories(ctx: NodeContext) -> Callable[[MailAgentState], MailAge
         pool_size = ctx.base.sentinel_row.config_values.get(
             "memory_candidate_pool", 100
         )
-        max_inject = ctx.base.sentinel_row.config_values.get(
-            "memory_inject_max", 16
-        )
+        max_inject = ctx.base.sentinel_row.config_values.get("memory_inject_max", 16)
 
         # Stage 3: Query candidate pool
         pool = mem_store.candidate_pool(sender, limit=pool_size)
@@ -674,9 +676,111 @@ def make_select_memories(ctx: NodeContext) -> Callable[[MailAgentState], MailAge
     return _node
 
 
+def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentState]:
+    """Factory for the draft_reply node.
+
+    Generates a draft reply to the latest email using LLM, injecting selected
+    memories when available. Saves the draft and emits a mission with evidence.
+
+    Empty thread → returns ``{}`` (no-op, no LLM, no emit).
+
+    Workflow:
+    1. Guard: skip if thread is empty.
+    2. Fetch memories by id from ``state["memory_ids"]`` (optional; defaults to []).
+    3. Build memory dicts for LLM injection: ``[{"kind", "scope", "scope_value", "content"}, ...]``
+    4. Call ``structured_call(draft_reply_prompt(...), DraftReplyOutput, ...)``
+    5. Save draft via ``ctx.mail.save_draft(in_reply_to=latest["id"], ...)``
+    6. Emit mission with ``sentinel_evidence`` artifact containing email_id, draft_id, etc.
+    7. Return ``{"draft": out.body, "draft_language": out.language}``.
+
+    Returns a node function that takes the current state and returns a
+    partial state dict with ``draft`` and ``draft_language`` keys (or empty dict
+    on empty thread).
+
+    Parameters
+    ----------
+    ctx
+        Execution context with mail adapter and base sentinel context.
+
+    Returns
+    -------
+    Callable
+        A node function ``(MailAgentState) -> MailAgentState``.
+    """
+
+    def _node(state: MailAgentState) -> MailAgentState:
+        thread: list[dict[str, Any]] = state.get("thread") or []
+
+        # Guard: empty thread → no-op
+        if not thread:
+            return {}
+
+        latest = thread[-1]
+
+        # Fetch memories if memory_ids provided
+        memory_ids = state.get("memory_ids") or []
+        memories = mem_store.get_many(memory_ids) if memory_ids else []
+
+        # Build memory dicts for LLM
+        memories_dicts = [
+            {
+                "kind": m.kind,
+                "scope": m.scope,
+                "scope_value": m.scope_value,
+                "content": m.content,
+            }
+            for m in memories
+        ]
+
+        # Call LLM to generate draft
+        prompt = draft_reply_prompt(
+            dict(state),
+            memories=memories_dicts,
+            owner_email=ctx.owner_email,
+        )
+        out: DraftReplyOutput = structured_call(
+            prompt,
+            DraftReplyOutput,
+            hardening=Hardening.FULL,
+            use_case=UseCase.DRAFT_REPLY,
+        )
+
+        # Save draft
+        draft_id = ctx.mail.save_draft(
+            in_reply_to=latest.get("id", ""),
+            body=out.body,
+            language=out.language,
+        )
+
+        # Emit mission with evidence
+        ctx.base.mission_emitter.emit(
+            intent_text=f"Draft ready: {latest.get('subject', '(no subject)')}",
+            reason=f"rule '{state.get('rule_name') or 'ai'}' matched; draft awaiting review",
+            artifact={
+                "kind": "sentinel_evidence",
+                "sentinel": "mail",
+                "evidence": {
+                    "email_id": latest.get("id"),
+                    "draft_id": draft_id,
+                    "language": out.language,
+                    "rule": state.get("rule_name"),
+                    "matched_by": state.get("matched_by"),
+                },
+                "hints": {
+                    "draft_body": out.body,
+                },
+            },
+        )
+
+        return {"draft": out.body, "draft_language": out.language}
+
+    return _node
+
+
 __all__ = [
     "NodeContext",
     "make_apply_actions",
+    "make_draft_reply",
     "make_learn_pattern",
     "make_load_thread",
     "make_match_rules",
