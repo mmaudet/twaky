@@ -205,6 +205,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/oauth/jmap/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Jmap Login
+         * @description Kick off the JMAP OAuth Authorization Code + PKCE flow.
+         */
+        get: operations["jmap_login_oauth_jmap_login_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/jmap/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Jmap Callback
+         * @description Handle JMAP OAuth provider callback, exchange code, store credential.
+         */
+        get: operations["jmap_callback_oauth_jmap_callback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/events": {
         parameters: {
             query?: never;
@@ -541,6 +581,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mail-sentinel/auth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Auth Status
+         * @description Return the current OAuth connection status for the mail sentinel.
+         *
+         *     Returns ``connected=false`` with all nullable fields as ``null`` when no
+         *     credential row exists. Returns ``connected=true`` plus the stored metadata
+         *     fields when a credential row is present (access/refresh tokens are NOT
+         *     included in the response — only metadata).
+         */
+        get: operations["get_auth_status_mail_sentinel_auth_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Auth
+         * @description Delete the OAuth credential for the mail sentinel.
+         *
+         *     Idempotent: silently succeeds if no credential row exists.
+         *     The delete trigger fires a NOTIFY on ``oauth_credential_changed`` so the
+         *     in-process sentinel stops polling until the owner reconnects.
+         */
+        delete: operations["delete_auth_mail_sentinel_auth_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail-sentinel/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Auth
+         * @description Force an immediate token refresh and return the updated auth status.
+         *
+         *     Returns 409 with code ``oauth_credential_not_found`` if no credential row
+         *     exists. Returns 502 with code ``refresh_failed`` if the token endpoint
+         *     rejects the refresh (e.g. ``invalid_grant``).
+         */
+        post: operations["refresh_auth_mail_sentinel_auth_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -604,6 +701,25 @@ export interface components {
             model?: string | null;
             /** Temperature */
             temperature?: number | null;
+        };
+        /** AuthStatus */
+        AuthStatus: {
+            /** Connected */
+            connected: boolean;
+            /** Provider */
+            provider?: string | null;
+            /** Account Email */
+            account_email?: string | null;
+            /** Account Name */
+            account_name?: string | null;
+            /** Session Url */
+            session_url?: string | null;
+            /** Access Token Expires At */
+            access_token_expires_at?: string | null;
+            /** Last Refresh At */
+            last_refresh_at?: string | null;
+            /** Last Refresh Error */
+            last_refresh_error?: string | null;
         };
         /** CancelBody */
         CancelBody: {
@@ -1499,6 +1615,57 @@ export interface operations {
             };
         };
     };
+    jmap_login_oauth_jmap_login_get: {
+        parameters: {
+            query?: {
+                return_to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    jmap_callback_oauth_jmap_callback_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     events_events_get: {
         parameters: {
             query?: never;
@@ -2218,6 +2385,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_auth_status_mail_sentinel_auth_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthStatus"];
+                };
+            };
+        };
+    };
+    delete_auth_mail_sentinel_auth_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    refresh_auth_mail_sentinel_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthStatus"];
                 };
             };
         };
