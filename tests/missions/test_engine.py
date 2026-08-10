@@ -92,6 +92,31 @@ def test_cancel_from_any_non_terminal():
     _cleanup(m.id)
 
 
+def test_park_for_review_lands_in_awaiting_user_with_artifact_and_reason():
+    artifact = {
+        "kind": "sentinel_evidence",
+        "sentinel": "mail",
+        "evidence": {"email_id": "eml-99"},
+    }
+    m = engine.park_for_review(
+        intent_text="Mail: sentinel smoke test",
+        owner_email="owner@example.com",
+        declared_by="sentinel:mail",
+        reason="needs owner review",
+        artifact=artifact,
+    )
+    got = repository.get(m.id)
+    assert got is not None
+    assert got.state == MissionState.AWAITING_USER, (
+        f"expected AWAITING_USER, got {got.state}"
+    )
+    assert got.state_reason == "needs owner review"
+    assert got.declared_by == "sentinel:mail"
+    assert len(got.artifacts) == 1
+    assert got.artifacts[0] == artifact
+    _cleanup(m.id)
+
+
 class TestLangfuseInstrumentation:
     def test_declare_emits_trace(self, monkeypatch):
         """When langfuse creds are set, engine.declare should call the client."""
