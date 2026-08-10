@@ -221,7 +221,9 @@ def insert_run(row: dict[str, Any]) -> SentinelRun:
         inserted = cur.fetchone()
 
     if inserted is None:
-        raise RuntimeError("INSERT INTO sentinel_run ... RETURNING * yielded no row")  # pragma: no cover
+        raise RuntimeError(
+            "INSERT INTO sentinel_run ... RETURNING * yielded no row"
+        )  # pragma: no cover
     return _row_to_run(inserted)
 
 
