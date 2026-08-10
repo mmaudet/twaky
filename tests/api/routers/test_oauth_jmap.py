@@ -78,6 +78,16 @@ def _wipe_oauth_credential():
     _truncate()
 
 
+@pytest.fixture(autouse=True)
+def _clear_oidc_metadata_cache():
+    """Clear the module-level OIDC discovery cache before each test."""
+    from twaky.api.routers import oauth_jmap
+
+    oauth_jmap._oidc_metadata_cache.clear()
+    yield
+    oauth_jmap._oidc_metadata_cache.clear()
+
+
 def _truncate() -> None:
     try:
         with psycopg.connect(_dsn(), autocommit=True) as conn, conn.cursor() as cur:
@@ -360,10 +370,17 @@ class TestCallbackSessionProbeFailed:
         cookies = {**_cookie(), JMAP_STATE_COOKIE: state_cookie}
 
         call_count = 0
+        _discovery = {
+            "authorization_endpoint": "https://auth.example.com/oauth2/authorize",
+            "token_endpoint": "https://auth.example.com/oauth2/token",
+            "userinfo_endpoint": "https://auth.example.com/oauth2/userinfo",
+        }
 
         async def _mock_get(url, **kwargs):
             nonlocal call_count
             call_count += 1
+            if "openid-configuration" in url:
+                return httpx.Response(200, json=_discovery)
             if "userinfo" in url:
                 return httpx.Response(200, json={"email": "me@x", "name": "Me"})
             # session probe → 401
@@ -431,7 +448,15 @@ class TestCallbackHappyPath:
         state_cookie = _make_state_cookie_value(payload)
         cookies = {**_cookie(), JMAP_STATE_COOKIE: state_cookie}
 
+        _discovery = {
+            "authorization_endpoint": "https://auth.example.com/oauth2/authorize",
+            "token_endpoint": "https://auth.example.com/oauth2/token",
+            "userinfo_endpoint": "https://auth.example.com/oauth2/userinfo",
+        }
+
         async def _mock_get(url, **kwargs):
+            if "openid-configuration" in url:
+                return httpx.Response(200, json=_discovery)
             if "userinfo" in url:
                 return httpx.Response(200, json={"email": "me@x.com", "name": "Me X"})
             # session probe
@@ -479,3 +504,44 @@ class TestCallbackHappyPath:
         assert cred.account_email == "me@x.com"
         assert cred.provider == "linagora_lemonldap"
         assert cred.sentinel_name == "mail"
+
+
+# ---------------------------------------------------------------------------
+# 8. Login — uses OIDC discovery endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestLoginUsesDiscovery:
+    def test_login_uses_discovery_endpoint(self, monkeypatch):
+        """login redirect URL must use the authorize endpoint from OIDC discovery."""
+        from twaky import config as _cfg
+        from twaky.api.routers import oauth_jmap
+
+        monkeypatch.setattr("twaky.api.deps.settings", _cfg.Settings(_env_file=None))
+        monkeypatch.setattr(
+            "twaky.api.routers.oauth_jmap.settings", _cfg.Settings(_env_file=None)
+        )
+        # Clear module-level cache so monkeypatched metadata is used.
+        oauth_jmap._oidc_metadata_cache.clear()
+
+        mock_metadata = {
+            "authorization_endpoint": "https://mock-idp.example.com/authorize",
+            "token_endpoint": "https://mock-idp.example.com/token",
+            "userinfo_endpoint": "https://mock-idp.example.com/userinfo",
+        }
+
+        async def _fake_get_oidc_metadata():
+            return mock_metadata
+
+        monkeypatch.setattr(oauth_jmap, "_get_oidc_metadata", _fake_get_oidc_metadata)
+
+        r = TestClient(app).get(
+            "/oauth/jmap/login",
+            cookies=_cookie(),
+            follow_redirects=False,
+        )
+        assert r.status_code == 302
+        location = r.headers["location"]
+        assert location.startswith("https://mock-idp.example.com/authorize"), (
+            f"Expected redirect to discovered authorize endpoint, got: {location}"
+        )

@@ -1,8 +1,15 @@
-"""JMAP OAuth code flow: /oauth/jmap/login + /oauth/jmap/callback.
+"""OIDC authorization code flow for the JMAP mail sentinel.
 
-Uses authlib's starlette_client OAuth for the PKCE + authorization-code exchange.
-State (return_to, code_verifier, state) is stored in a signed short-lived cookie
-(twaky_jmap_state) using itsdangerous.TimestampSigner so the server stays stateless.
+Implements the code flow against the owner's LemonLDAP-NG deployment:
+GET /oauth/jmap/login redirects to the issuer's authorize endpoint
+(discovered via .well-known/openid-configuration) with PKCE (S256) and
+a signed state cookie carrying return_to. GET /oauth/jmap/callback
+verifies the state cookie, exchanges the code for tokens via raw httpx
+(POST token_endpoint with grant_type=authorization_code + code_verifier),
+fetches userinfo, probes the JMAP session URL to confirm the token is
+accepted, then upserts an oauth_credential row (SP6b T4) with Fernet-
+encrypted access + refresh tokens (SP6b T3). Redirects back to return_to
+with ?status=connected or ?status=error&reason=<code>.
 """
 
 from __future__ import annotations
@@ -32,6 +39,46 @@ log = structlog.get_logger("twaky.api.oauth_jmap")
 
 JMAP_STATE_COOKIE = "twaky_jmap_state"
 STATE_TTL_SECONDS = 600  # 10 min
+
+# Module-level cache: issuer URL → discovery dict.
+_oidc_metadata_cache: dict[str, dict[str, str]] = {}
+
+
+async def _get_oidc_metadata() -> dict[str, str]:
+    """Fetch and cache .well-known/openid-configuration for the JMAP issuer.
+
+    Returns a dict with at least ``authorization_endpoint``, ``token_endpoint``,
+    and ``userinfo_endpoint``.  On discovery failure (network error, non-200
+    response) falls back to LemonLDAP-NG conventional paths and logs a warning
+    so the issue surfaces without breaking an MVP deployment.
+    """
+    issuer = settings.jmap_oauth_issuer.rstrip("/")
+    if issuer in _oidc_metadata_cache:
+        return _oidc_metadata_cache[issuer]
+
+    discovery_url = issuer + "/.well-known/openid-configuration"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            resp = await http.get(discovery_url)
+        if resp.status_code == 200:
+            metadata = resp.json()
+            _oidc_metadata_cache[issuer] = metadata
+            return metadata
+        log.warning(
+            "oidc_discovery_non_200",
+            url=discovery_url,
+            status=resp.status_code,
+        )
+    except Exception as exc:
+        log.warning("oidc_discovery_failed", url=discovery_url, exc_info=exc)
+
+    # Fallback: LemonLDAP-NG conventional paths
+    fallback: dict[str, str] = {
+        "authorization_endpoint": issuer + "/oauth2/authorize",
+        "token_endpoint": issuer + "/oauth2/token",
+        "userinfo_endpoint": issuer + "/oauth2/userinfo",
+    }
+    return fallback
 
 
 def _signer() -> itsdangerous.TimestampSigner:
@@ -88,8 +135,9 @@ async def jmap_login(
 
     callback_url = f"{settings.api_base_url.rstrip('/')}/oauth/jmap/callback"
 
-    # Build the authorize URL manually (avoids authlib session storage issues).
-    authorize_url = settings.jmap_oauth_issuer.rstrip("/") + "/oauth2/authorize"
+    # Discover the authorize endpoint; fallback to conventional path on failure.
+    metadata = await _get_oidc_metadata()
+    authorize_url = metadata["authorization_endpoint"]
     params = {
         "response_type": "code",
         "client_id": settings.jmap_oauth_client_id,
@@ -153,15 +201,17 @@ async def jmap_callback(
 
     code = request.query_params.get("code", "")
     if not code:
-        log.warning("jmap_callback_no_code")
+        provider_error = request.query_params.get("error")
+        log.warning("jmap_callback_no_code", provider_error=provider_error)
         return _redirect_to(return_to, status="error", reason="code_exchange_failed")
 
     callback_url = f"{settings.api_base_url.rstrip('/')}/oauth/jmap/callback"
 
     # --- 2–3. Exchange authorization code for tokens ---
     try:
-        token_endpoint = settings.jmap_oauth_issuer.rstrip("/") + "/oauth2/token"
-        async with httpx.AsyncClient() as http:
+        metadata = await _get_oidc_metadata()
+        token_endpoint = metadata["token_endpoint"]
+        async with httpx.AsyncClient(timeout=30.0) as http:
             token_resp = await http.post(
                 token_endpoint,
                 data={
@@ -196,8 +246,8 @@ async def jmap_callback(
 
     # --- 4. Fetch userinfo ---
     try:
-        userinfo_url = settings.jmap_oauth_issuer.rstrip("/") + "/oauth2/userinfo"
-        async with httpx.AsyncClient() as http:
+        userinfo_url = metadata["userinfo_endpoint"]
+        async with httpx.AsyncClient(timeout=30.0) as http:
             userinfo_resp = await http.get(
                 userinfo_url,
                 headers={"Authorization": f"Bearer {access_token}"},
