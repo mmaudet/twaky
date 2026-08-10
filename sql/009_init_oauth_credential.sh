@@ -1,7 +1,7 @@
 #!/bin/bash
 # Provision oauth_credential table, indexes, trigger functions, and triggers.
 # Runs once on first-boot volume init. For existing volumes:
-#   docker exec -i twaky-pg bash /docker-entrypoint-initdb.d/010_init_oauth_credential.sh
+#   docker exec -i twaky-pg bash /docker-entrypoint-initdb.d/009_init_oauth_credential.sh
 set -euo pipefail
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-twaky}" <<-'EOSQL'

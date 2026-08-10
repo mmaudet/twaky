@@ -106,6 +106,17 @@ def _redirect_to(return_to: str, **params: str) -> RedirectResponse:
     return RedirectResponse(url=url, status_code=302)
 
 
+def _error_redirect(return_to: str, reason: str) -> RedirectResponse:
+    """Build an error 302 and delete the JMAP state cookie.
+
+    Clears the ``twaky_jmap_state`` cookie on all error paths to avoid
+    leaving a stale signed state on the browser (minor CSRF-hygiene concern).
+    """
+    response = _redirect_to(return_to, status="error", reason=reason)
+    response.delete_cookie(key=JMAP_STATE_COOKIE, path="/")
+    return response
+
+
 def _pkce_pair() -> tuple[str, str]:
     """Return (code_verifier, code_challenge_s256)."""
     verifier = secrets.token_urlsafe(96)[:128]  # 128-char URL-safe string
@@ -174,16 +185,16 @@ async def jmap_callback(
     cookie_value = request.cookies.get(JMAP_STATE_COOKIE)
     if not cookie_value:
         log.warning("jmap_callback_no_state_cookie")
-        return _redirect_to(default_return_to, status="error", reason="state_mismatch")
+        return _error_redirect(default_return_to, "state_mismatch")
 
     try:
         state_payload = _verify_state_cookie(cookie_value)
     except itsdangerous.SignatureExpired:
         log.warning("jmap_callback_state_expired")
-        return _redirect_to(default_return_to, status="error", reason="state_expired")
+        return _error_redirect(default_return_to, "state_expired")
     except itsdangerous.BadSignature:
         log.warning("jmap_callback_bad_signature")
-        return _redirect_to(default_return_to, status="error", reason="state_mismatch")
+        return _error_redirect(default_return_to, "state_mismatch")
 
     return_to = _safe_return_to(state_payload.get("return_to", default_return_to))
     code_verifier = state_payload.get("code_verifier", "")
@@ -197,13 +208,13 @@ async def jmap_callback(
             expected=expected_state,
             received=received_state,
         )
-        return _redirect_to(return_to, status="error", reason="state_mismatch")
+        return _error_redirect(return_to, "state_mismatch")
 
     code = request.query_params.get("code", "")
     if not code:
         provider_error = request.query_params.get("error")
         log.warning("jmap_callback_no_code", provider_error=provider_error)
-        return _redirect_to(return_to, status="error", reason="code_exchange_failed")
+        return _error_redirect(return_to, "code_exchange_failed")
 
     callback_url = f"{settings.api_base_url.rstrip('/')}/oauth/jmap/callback"
 
@@ -225,9 +236,7 @@ async def jmap_callback(
             )
         if token_resp.status_code >= 400:
             log.warning("jmap_callback_token_error", status=token_resp.status_code)
-            return _redirect_to(
-                return_to, status="error", reason="code_exchange_failed"
-            )
+            return _error_redirect(return_to, "code_exchange_failed")
 
         token_data = token_resp.json()
         access_token: str = token_data.get("access_token", "")
@@ -236,13 +245,11 @@ async def jmap_callback(
 
         if not access_token:
             log.warning("jmap_callback_no_access_token")
-            return _redirect_to(
-                return_to, status="error", reason="code_exchange_failed"
-            )
+            return _error_redirect(return_to, "code_exchange_failed")
 
     except Exception as exc:
         log.exception("jmap_callback_code_exchange_failed", exc_info=exc)
-        return _redirect_to(return_to, status="error", reason="code_exchange_failed")
+        return _error_redirect(return_to, "code_exchange_failed")
 
     # --- 4. Fetch userinfo ---
     try:
@@ -256,9 +263,7 @@ async def jmap_callback(
             log.warning(
                 "jmap_callback_userinfo_error", status=userinfo_resp.status_code
             )
-            return _redirect_to(
-                return_to, status="error", reason="code_exchange_failed"
-            )
+            return _error_redirect(return_to, "code_exchange_failed")
 
         userinfo = userinfo_resp.json()
         account_email: str = userinfo.get("email", "")
@@ -266,12 +271,12 @@ async def jmap_callback(
 
     except Exception as exc:
         log.exception("jmap_callback_userinfo_failed", exc_info=exc)
-        return _redirect_to(return_to, status="error", reason="code_exchange_failed")
+        return _error_redirect(return_to, "code_exchange_failed")
 
     # --- 5. Session probe: verify token is accepted by James ---
     if not settings.jmap_session_url:
         log.warning("jmap_callback_no_session_url")
-        return _redirect_to(return_to, status="error", reason="session_probe_failed")
+        return _error_redirect(return_to, "session_probe_failed")
 
     try:
         async with httpx.AsyncClient() as http:
@@ -283,13 +288,11 @@ async def jmap_callback(
             log.warning(
                 "jmap_callback_session_probe_failed", status=session_resp.status_code
             )
-            return _redirect_to(
-                return_to, status="error", reason="session_probe_failed"
-            )
+            return _error_redirect(return_to, "session_probe_failed")
 
     except Exception as exc:
         log.exception("jmap_callback_session_probe_exception", exc_info=exc)
-        return _redirect_to(return_to, status="error", reason="session_probe_failed")
+        return _error_redirect(return_to, "session_probe_failed")
 
     # --- 6. Upsert oauth_credential ---
     access_token_expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
@@ -309,7 +312,7 @@ async def jmap_callback(
         )
     except Exception as exc:
         log.exception("jmap_callback_upsert_failed", exc_info=exc)
-        return _redirect_to(return_to, status="error", reason="code_exchange_failed")
+        return _error_redirect(return_to, "code_exchange_failed")
 
     # --- 7. Delete state cookie + redirect to success ---
     if "?" in return_to:

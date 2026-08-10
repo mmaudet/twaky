@@ -15,7 +15,7 @@ Copied verbatim from spec §16 — every task's requirements implicitly include 
 - **Endpoints**: `/oauth/jmap/*` + `/mail-sentinel/auth/*` at API root, no `/api` prefix (frontend rewrites via `next.config.ts`).
 - **New table**: `oauth_credential` (singular, unquoted).
 - **NOTIFY channel**: `oauth_credential_changed`, always via `pg_notify(channel, payload)` function form — NEVER `NOTIFY channel, %s` (regression `1b7b58d` on 2026-08-03).
-- **Migration file convention**: `sql/010_init_oauth_credential.sh` matches the SP6 T1 template (`sql/008_init_sentinels.sh`).
+- **Migration file convention**: `sql/009_init_oauth_credential.sh` matches the SP6 T1 template (`sql/008_init_sentinels.sh`).
 - **Encryption at rest**: every `*_enc TEXT` column stores `Fernet.encrypt(...)` base64 ASCII. Losing `TWAKY_SECRET_KEY` = losing all credentials. **Never log decrypted secrets.**
 - **State cookie**: `twaky_jmap_state`, signed with `settings.api_session_secret` via `itsdangerous.TimestampSigner`, 10-min TTL, `HttpOnly`, `Secure`, `SameSite=Lax`.
 - **PKCE**: mandatory (S256), even though the client is confidential — defense in depth.
@@ -50,7 +50,7 @@ Same as SP6:
 
 | Path | Purpose |
 |---|---|
-| `sql/010_init_oauth_credential.sh` | psql-heredoc migration: table + 2 triggers |
+| `sql/009_init_oauth_credential.sh` | psql-heredoc migration: table + 2 triggers |
 | `src/twaky/crypto/__init__.py` | Package init |
 | `src/twaky/crypto/secrets.py` | Fernet encrypt/decrypt under `TWAKY_SECRET_KEY` |
 | `src/twaky/oauth/__init__.py` | Package init |
@@ -97,14 +97,14 @@ Same as SP6:
 
 ---
 
-## Task 1: Migration `sql/010_init_oauth_credential.sh` + static tests
+## Task 1: Migration `sql/009_init_oauth_credential.sh` + static tests
 
-**Files:** create `sql/010_init_oauth_credential.sh` + `tests/sql/test_oauth_credential_migration.py`. **Refer to spec §5 for the exact table + trigger definitions.**
+**Files:** create `sql/009_init_oauth_credential.sh` + `tests/sql/test_oauth_credential_migration.py`. **Refer to spec §5 for the exact table + trigger definitions.**
 
 **Produces:** table `oauth_credential` (13 columns), 2 PG functions (`notify_oauth_credential_changed`, `oauth_credential_bump_updated_at`), 2 triggers (AFTER INSERT/UPDATE/DELETE for NOTIFY; BEFORE UPDATE for updated_at).
 
-- [ ] **Step 1:** Write `sql/010_init_oauth_credential.sh` modeled on `sql/008_init_sentinels.sh` (bash + `psql -v ON_ERROR_STOP=1` + single-quoted `<<-'EOSQL'` heredoc so dollar-quoted plpgsql passes through unexpanded).
-- [ ] **Step 2:** `chmod +x sql/010_init_oauth_credential.sh`.
+- [ ] **Step 1:** Write `sql/009_init_oauth_credential.sh` modeled on `sql/008_init_sentinels.sh` (bash + `psql -v ON_ERROR_STOP=1` + single-quoted `<<-'EOSQL'` heredoc so dollar-quoted plpgsql passes through unexpanded).
+- [ ] **Step 2:** `chmod +x sql/009_init_oauth_credential.sh`.
 - [ ] **Step 3:** Static assertion tests in `tests/sql/test_oauth_credential_migration.py`, mirroring `tests/sql/test_sentinels_migration.py`:
   - script exists + executable
   - contains `CREATE TABLE IF NOT EXISTS public.oauth_credential`
@@ -118,7 +118,7 @@ Same as SP6:
 - [ ] **Step 4:** `uv run pytest tests/sql/test_oauth_credential_migration.py -v` → all pass.
 - [ ] **Step 5:** Apply on live volume:
   ```
-  docker exec -i twaky-pg bash /docker-entrypoint-initdb.d/010_init_oauth_credential.sh
+  docker exec -i twaky-pg bash /docker-entrypoint-initdb.d/009_init_oauth_credential.sh
   docker exec -i twaky-pg psql -U "$POSTGRES_USER" -d twaky -c '\d oauth_credential'
   ```
   Expected: table present with the 13 columns.
@@ -451,7 +451,7 @@ After T12 lands + CI green:
 
 1. **Full sanity suite**: `TWAKY_PG_HOST=172.27.0.33 RABBITMQ_URL=... uv run pytest tests/sentinels tests/oauth tests/crypto tests/api tests/sql tests/cli tests/missions tests/evals -v` — no regressions vs main (except the 3 known pre-existing flakes documented in SP6 ledger).
 2. **Deploy prereqs**: operator registers LemonLDAP client (spec §3), generates `TWAKY_SECRET_KEY`, populates `.env`.
-3. **Migration**: `docker exec -i twaky-pg bash /docker-entrypoint-initdb.d/010_init_oauth_credential.sh`.
+3. **Migration**: `docker exec -i twaky-pg bash /docker-entrypoint-initdb.d/009_init_oauth_credential.sh`.
 4. **Restart**: `docker compose restart twaky-api twaky-sentinel`.
 5. **Manual smoke** per spec §13 checklist: connect via UI → send self an email → mission appears in `/missions`.
 6. Invoke `superpowers:finishing-a-development-branch` to decide merge vs PR.

@@ -6,7 +6,7 @@ tests once the container is available.
 
 from pathlib import Path
 
-SCRIPT = Path(__file__).parents[2] / "sql" / "010_init_oauth_credential.sh"
+SCRIPT = Path(__file__).parents[2] / "sql" / "009_init_oauth_credential.sh"
 
 
 def test_script_exists_and_is_executable():

@@ -90,7 +90,7 @@ The client_secret goes into `JMAP_OAUTH_CLIENT_SECRET` in `.env` on twake-dev. E
 
 ## 5. SQL schema
 
-`sql/010_init_oauth_credential.sh` — same template as `sql/008_init_sentinels.sh` (bash + heredoc'd psql).
+`sql/009_init_oauth_credential.sh` — same template as `sql/008_init_sentinels.sh` (bash + heredoc'd psql).
 
 ```sql
 CREATE TABLE IF NOT EXISTS public.oauth_credential (
@@ -397,7 +397,7 @@ JMAP_ACCOUNT_EMAIL=      # captured from OIDC userinfo, stored as account_email
 ## 14. Deployment
 
 1. **Prereq (manual, ~5 min)**: owner registers the LemonLDAP client per §3, captures client_secret.
-2. **Migration**: `docker exec -i twaky-pg bash /docker-entrypoint-initdb.d/010_init_oauth_credential.sh`.
+2. **Migration**: `docker exec -i twaky-pg bash /docker-entrypoint-initdb.d/009_init_oauth_credential.sh`.
 3. **Env**: generate `TWAKY_SECRET_KEY`, populate `JMAP_OAUTH_CLIENT_SECRET`, remove `JMAP_BEARER_TOKEN` + `JMAP_ACCOUNT_EMAIL`, restart `twaky-api` + `twaky-sentinel` (`docker compose restart twaky-api twaky-sentinel`).
 4. **First connect**: owner does the manual smoke test.
 
@@ -407,7 +407,7 @@ If the container was already running with the old `JMAP_BEARER_TOKEN`, the T6b `
 
 The plan (SP6b implementation plan) will decompose into ~12 tasks:
 
-1. `sql/010_init_oauth_credential.sh` + static assertion tests.
+1. `sql/009_init_oauth_credential.sh` + static assertion tests.
 2. `src/twaky/config.py` new fields + `.env.example` update.
 3. `src/twaky/crypto/secrets.py` + tests.
 4. `src/twaky/oauth/{models,repository}.py` + tests.
@@ -425,7 +425,7 @@ The plan (SP6b implementation plan) will decompose into ~12 tasks:
 - **Endpoints**: `/oauth/jmap/*` + `/mail-sentinel/auth/*` at API root, no `/api` prefix (frontend rewrites).
 - **New table**: `oauth_credential` (singular, unquoted).
 - **NOTIFY channel**: `oauth_credential_changed`, always via `pg_notify(channel, payload)` function form.
-- **Migration file convention**: `sql/010_init_oauth_credential.sh` matches the SP6 template.
+- **Migration file convention**: `sql/009_init_oauth_credential.sh` matches the SP6 template.
 - **Encryption at rest**: every `*_enc TEXT` column stores `Fernet.encrypt(...)` base64 ASCII. Losing `TWAKY_SECRET_KEY` = losing all credentials. Never log decrypted secrets.
 - **State cookie**: `twaky_jmap_state`, signed with `settings.api_session_secret` via `itsdangerous.TimestampSigner`, 10-min TTL, HttpOnly + Secure + SameSite=Lax.
 - **PKCE**: mandatory (S256), even though the client is confidential — defense in depth against code interception.
