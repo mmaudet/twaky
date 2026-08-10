@@ -453,6 +453,36 @@ async def _housekeeping(settings: Settings, stop_event: asyncio.Event) -> None:
         except Exception:
             log.exception("housekeeping: purge_expired failed")
 
+        try:
+            from twaky.sentinels.mail.store import spam_decisions
+
+            # Read retention from mail sentinel config_values if present.
+            cfg = get_registry().get("mail")
+            active_days = int(
+                (cfg.config_values if cfg else {}).get("spam_purge_active_days", 30)
+            )
+            restored_days = int(
+                (cfg.config_values if cfg else {}).get("spam_purge_restored_days", 90)
+            )
+            active_purged = await asyncio.to_thread(
+                spam_decisions.purge_active, active_days
+            )
+            restored_purged = await asyncio.to_thread(
+                spam_decisions.purge_restored, restored_days
+            )
+            if active_purged:
+                log.info(
+                    "housekeeping: purged %d active mail_sentinel_spam_decision rows",
+                    active_purged,
+                )
+            if restored_purged:
+                log.info(
+                    "housekeeping: purged %d restored mail_sentinel_spam_decision rows",
+                    restored_purged,
+                )
+        except Exception:
+            log.exception("housekeeping: spam_decisions purge failed")
+
 
 __all__ = [
     "SentinelRuntime",
