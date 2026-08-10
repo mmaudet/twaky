@@ -25,6 +25,11 @@ def test_draft_reply_is_draft_tier() -> None:
     assert tier_for(UseCase.DRAFT_REPLY) is Tier.DRAFT
 
 
+def test_spam_check_is_economy_tier() -> None:
+    """Assert UseCase.SPAM_CHECK maps to Tier.ECONOMY."""
+    assert tier_for(UseCase.SPAM_CHECK) is Tier.ECONOMY
+
+
 def test_models_for_parses_comma_list(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "mail_sentinel_default_llms", "a/b,c/d, e/f ")
     assert models_for(Tier.DEFAULT) == ["a/b", "c/d", "e/f"]
