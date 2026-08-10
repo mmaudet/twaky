@@ -728,6 +728,265 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/rules:
+    get:
+      tags:
+      - mail-sentinel
+      summary: List Rules
+      description: 'Return all rules ordered by priority ASC.
+
+
+        When ``enabled=true``, delegates to ``list_all(enabled_only=True)`` to
+
+        filter at the DB level.  When absent or ``enabled=false``, fetches all
+
+        rows and filters client-side so the FE can decide.'
+      operationId: list_rules_mail_sentinel_rules_get
+      parameters:
+      - name: enabled
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Enabled
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MailRuleSummary'
+                title: Response List Rules Mail Sentinel Rules Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - mail-sentinel
+      summary: Create Rule
+      description: 'Create a new mail rule with full validation.
+
+
+        Returns 422 with code ``validation_failed`` on service-layer rejections.'
+      operationId: create_rule_mail_sentinel_rules_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailRuleCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailRuleDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/rules/{rule_id}:
+    get:
+      tags:
+      - mail-sentinel
+      summary: Get Rule
+      description: Return the full detail for a single rule.
+      operationId: get_rule_mail_sentinel_rules__rule_id__get
+      parameters:
+      - name: rule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Rule Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailRuleDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - mail-sentinel
+      summary: Patch Rule
+      description: 'Apply a partial patch to a rule.
+
+
+        Returns 422 with ``validation_failed`` on empty body or invalid fields.
+
+        Returns 404 with ``mail_rule_not_found`` if the rule does not exist.'
+      operationId: patch_rule_mail_sentinel_rules__rule_id__patch
+      parameters:
+      - name: rule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Rule Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailRulePatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailRuleDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - mail-sentinel
+      summary: Delete Rule
+      description: Delete a rule by id. Returns 404 if not found.
+      operationId: delete_rule_mail_sentinel_rules__rule_id__delete
+      parameters:
+      - name: rule_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Rule Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/memories:
+    get:
+      tags:
+      - mail-sentinel
+      summary: List Memories
+      description: Return recently created memories, optionally filtered by scope.
+      operationId: list_memories_mail_sentinel_memories_get
+      parameters:
+      - name: scope
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Scope
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MailMemorySummary'
+                title: Response List Memories Mail Sentinel Memories Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/learned-patterns:
+    get:
+      tags:
+      - mail-sentinel
+      summary: List Learned Patterns
+      description: Return all learned patterns, optionally filtered to active ones.
+      operationId: list_learned_patterns_mail_sentinel_learned_patterns_get
+      parameters:
+      - name: active_only
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Active Only
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LearnedPatternSummary'
+                title: Response List Learned Patterns Mail Sentinel Learned Patterns
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/learned-patterns/{sender_email}/{rule_name}:
+    delete:
+      tags:
+      - mail-sentinel
+      summary: Forget Pattern
+      description: Forget a learned pattern. Silently succeeds even if the row does
+        not exist.
+      operationId: forget_pattern_mail_sentinel_learned_patterns__sender_email___rule_name__delete
+      parameters:
+      - name: sender_email
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Sender Email
+      - name: rule_name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Rule Name
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     Agent:
@@ -884,6 +1143,283 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    LearnedPatternSummary:
+      properties:
+        id:
+          type: string
+          title: Id
+        sender_email:
+          type: string
+          title: Sender Email
+        rule_name:
+          type: string
+          title: Rule Name
+        confidence:
+          type: number
+          title: Confidence
+        evidence_count:
+          type: integer
+          title: Evidence Count
+        first_seen:
+          type: string
+          format: date-time
+          title: First Seen
+        last_confirmed:
+          type: string
+          format: date-time
+          title: Last Confirmed
+        is_active:
+          type: boolean
+          title: Is Active
+      type: object
+      required:
+      - id
+      - sender_email
+      - rule_name
+      - confidence
+      - evidence_count
+      - first_seen
+      - last_confirmed
+      - is_active
+      title: LearnedPatternSummary
+      description: Summary of a mail_sentinel_learned_pattern row.
+    MailMemorySummary:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        kind:
+          type: string
+          title: Kind
+        scope:
+          type: string
+          title: Scope
+        scope_value:
+          type: string
+          title: Scope Value
+        content:
+          type: string
+          title: Content
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+      type: object
+      required:
+      - id
+      - kind
+      - scope
+      - scope_value
+      - content
+      - created_at
+      - expires_at
+      title: MailMemorySummary
+      description: Summary of a mail_sentinel_memory row (evidence omitted).
+    MailRuleCreate:
+      properties:
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+          default: ''
+        conditions:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Conditions
+          default: []
+        combinator:
+          type: string
+          title: Combinator
+          default: OR
+        actions:
+          items:
+            type: string
+          type: array
+          title: Actions
+        priority:
+          type: integer
+          title: Priority
+          default: 100
+        enabled:
+          type: boolean
+          title: Enabled
+          default: true
+        run_on_threads:
+          type: boolean
+          title: Run On Threads
+          default: true
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - actions
+      title: MailRuleCreate
+      description: Payload for POST /mail-sentinel/rules.
+    MailRuleDetail:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+        priority:
+          type: integer
+          title: Priority
+        enabled:
+          type: boolean
+          title: Enabled
+        run_on_threads:
+          type: boolean
+          title: Run On Threads
+        action_count:
+          type: integer
+          title: Action Count
+        condition_count:
+          type: integer
+          title: Condition Count
+        conditions:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Conditions
+        combinator:
+          type: string
+          title: Combinator
+        actions:
+          items:
+            type: string
+          type: array
+          title: Actions
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - priority
+      - enabled
+      - run_on_threads
+      - action_count
+      - condition_count
+      - conditions
+      - combinator
+      - actions
+      - created_at
+      - updated_at
+      title: MailRuleDetail
+      description: Full rule row including conditions, combinator, actions, timestamps.
+    MailRulePatch:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        conditions:
+          anyOf:
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          - type: 'null'
+          title: Conditions
+        combinator:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Combinator
+        actions:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Actions
+        priority:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Priority
+        enabled:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Enabled
+        run_on_threads:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Run On Threads
+      additionalProperties: false
+      type: object
+      title: MailRulePatch
+      description: Partial update payload for PATCH /mail-sentinel/rules/{id}.
+    MailRuleSummary:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+        priority:
+          type: integer
+          title: Priority
+        enabled:
+          type: boolean
+          title: Enabled
+        run_on_threads:
+          type: boolean
+          title: Run On Threads
+        action_count:
+          type: integer
+          title: Action Count
+        condition_count:
+          type: integer
+          title: Condition Count
+      type: object
+      required:
+      - id
+      - name
+      - description
+      - priority
+      - enabled
+      - run_on_threads
+      - action_count
+      - condition_count
+      title: MailRuleSummary
+      description: Shallow representation used in the rules list endpoint.
     Mission:
       properties:
         id:
