@@ -249,3 +249,93 @@ class TestEngineNotify:
                 break
         assert str(m.id) in notified
         _cleanup(m.id)
+
+
+class TestParkForReviewNotifyDiscipline:
+    """park_for_review must fire mission_changed but NOT mission_declared.
+
+    The atomicity contract: park_for_review is a single-transaction INSERT+UPDATE
+    that deliberately suppresses the mission_declared NOTIFY so the Atlas daemon
+    does not race to PLANNING.  Only mission_changed(awaiting_user) fires.
+    A regression that adds _notify("mission_declared", ...) inside park_for_review
+    would break atlas coexistence — this test class guards that invariant.
+    """
+
+    def test_park_for_review_does_not_notify_mission_declared(self):
+        """LISTEN mission_declared; call park_for_review; assert NO notification arrives."""
+        import json
+
+        import psycopg
+
+        from twaky.missions import engine as _engine
+
+        artifact = {"kind": "sentinel_evidence", "sentinel": "mail", "evidence": {}}
+        with psycopg.connect(_dsn(), autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("LISTEN mission_declared")
+            m = _engine.park_for_review(
+                intent_text="NOTIFY discipline test",
+                owner_email="a@x",
+                declared_by="sentinel:mail",
+                reason="test",
+                artifact=artifact,
+            )
+            conn.execute("SELECT 1")  # flush
+            # Drain up to 500 ms — assert no mission_declared payload for our mission.
+            for n in conn.notifies(timeout=0.5):
+                payload = n.payload
+                # The channel may carry payloads from other concurrent tests; only
+                # reject a notification that matches our specific mission id.
+                if payload == str(m.id):
+                    _cleanup(m.id)
+                    raise AssertionError(
+                        f"park_for_review unexpectedly fired mission_declared "
+                        f"for mission {m.id}"
+                    )
+                # Try JSON payload too (in case format changes).
+                try:
+                    data = json.loads(payload)
+                    if data.get("mission_id") == str(m.id):
+                        _cleanup(m.id)
+                        raise AssertionError(
+                            f"park_for_review unexpectedly fired mission_declared "
+                            f"(JSON) for mission {m.id}"
+                        )
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        _cleanup(m.id)
+
+    def test_park_for_review_does_notify_mission_changed(self):
+        """LISTEN mission_changed; call park_for_review; assert notify arrives with state=awaiting_user."""
+        import json
+
+        import psycopg
+
+        from twaky.missions import engine as _engine
+
+        artifact = {"kind": "sentinel_evidence", "sentinel": "mail", "evidence": {}}
+        with psycopg.connect(_dsn(), autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("LISTEN mission_changed")
+            m = _engine.park_for_review(
+                intent_text="NOTIFY discipline test (positive)",
+                owner_email="a@x",
+                declared_by="sentinel:mail",
+                reason="test",
+                artifact=artifact,
+            )
+            conn.execute("SELECT 1")  # flush
+            found: dict | None = None
+            for n in conn.notifies(timeout=2):
+                try:
+                    data = json.loads(n.payload)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if data.get("mission_id") == str(m.id):
+                    found = data
+                    break
+        assert found is not None, (
+            f"park_for_review did not fire mission_changed for mission {m.id}"
+        )
+        assert found["state"] == "awaiting_user", (
+            f"Expected state=awaiting_user in mission_changed payload, got: {found}"
+        )
+        _cleanup(m.id)

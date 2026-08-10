@@ -287,6 +287,16 @@ async def _process_with_bookkeeping(
     --------------------------------------------------
     The *ack* callable is NOT invoked here — ``_dispatch`` calls it only
     when outcome is not ERROR.
+
+    Error retry policy — at-most-once (deliberate)
+    -----------------------------------------------
+    Sentinel errors are at-most-once.  A ``sentinel_run`` row with
+    ``outcome='error'`` still counts as processed for idempotency: broker
+    redelivery of the same event will be detected by ``find_run_by_event_ref``
+    and marked ``ignored``.  This is deliberate — unbounded LLM retries would
+    blow the cost budget and mask systemic failures.  Operators should monitor
+    ``outcome='error'`` rows via the /sentinels API.  Changing to at-least-once
+    (retry N times before permanent error) is deferred to SP6b.
     """
     sentinel_name = inst.name
     event_ref = f"{event['source_ref']}:{event['message_id']}"

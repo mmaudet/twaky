@@ -327,6 +327,16 @@ def find_run_by_event_ref(
     (spec §4.1 idempotency guard requirement).
 
     Returns None if no matching run is found.
+
+    Error retry policy — at-most-once (deliberate)
+    -----------------------------------------------
+    This function matches on ANY outcome, including ``outcome='error'``.  A run
+    that ended in error still counts as processed: broker redelivery of the same
+    event will return the error row, causing the caller to insert an ``ignored``
+    run instead of retrying.  This is deliberate — unbounded LLM retries would
+    blow the cost budget and mask systemic failures.  Operators should monitor
+    ``outcome='error'`` rows via the /sentinels API.  Changing to at-least-once
+    (retry N times before permanent error) is deferred to SP6b.
     """
     sql = (
         "SELECT * FROM sentinel_run "

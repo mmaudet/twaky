@@ -85,6 +85,16 @@ class JmapPollingEventSource(EventSource):
     poll_interval_s:
         Seconds to sleep between polls.  ``stop_event`` can interrupt the
         sleep early.
+
+    Ack semantics (at-most-once)
+    ----------------------------
+    JMAP has no upstream acknowledgement mechanism.  ``_persist_state(new_state)``
+    is called *after* fetching each batch but *before* the consumer finishes
+    processing every yielded event.  A consumer crash mid-batch will lose the
+    unprocessed events in that batch — they will not be re-delivered on restart
+    because the state pointer has already advanced.  This is at-most-once delivery,
+    unlike the at-least-once guarantee provided by RabbitMQ.  SP6b will add
+    per-message state persistence to achieve at-least-once for JMAP sources.
     """
 
     def __init__(

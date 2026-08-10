@@ -120,27 +120,39 @@ class Delegation:
     async def _await_terminal(
         self, mission_id: UUID, timeout_s: float
     ) -> DelegationResult:
-        """Async core: LISTEN on mission_changed, re-read on each matching NOTIFY."""
-        # Fast path: Atlas may have already finished before we started listening.
-        current = repository.get(mission_id)
-        if current is not None and current.state.is_terminal:
-            log.info(
-                "delegation.already_terminal",
-                mission_id=str(mission_id),
-                state=current.state.value,
-            )
-            return DelegationResult(
-                mission_id=mission_id,
-                state=current.state.value,
-                payload=list(current.artifacts),
-            )
+        """Async core: LISTEN on mission_changed, re-read on each matching NOTIFY.
 
+        LISTEN order matters (M2, SP6 final review): we open the connection and
+        issue LISTEN *before* the fast-path get().  If the order were reversed,
+        Atlas could transition the mission to a terminal state between the get()
+        return and the LISTEN registration, silently dropping the NOTIFY and
+        causing delegate() to wait until ``timeout_s`` even though the mission
+        is already done.  Opening LISTEN first guarantees no transition is missed:
+        the fast-path get() that follows will catch any already-terminal state,
+        and the notify loop will catch any transition that happens afterwards.
+        """
         try:
             async with asyncio.timeout(timeout_s):
                 async with await psycopg.AsyncConnection.connect(
                     self._dsn, autocommit=True
                 ) as conn:
+                    # Register LISTEN *before* the fast-path get() — see docstring.
                     await conn.execute("LISTEN mission_changed")
+
+                    # Fast path: Atlas may have already finished before we registered.
+                    current = repository.get(mission_id)
+                    if current is not None and current.state.is_terminal:
+                        log.info(
+                            "delegation.already_terminal",
+                            mission_id=str(mission_id),
+                            state=current.state.value,
+                        )
+                        return DelegationResult(
+                            mission_id=mission_id,
+                            state=current.state.value,
+                            payload=list(current.artifacts),
+                        )
+
                     async for notify in conn.notifies():
                         # The mission_changed payload is JSON:
                         # {"mission_id": "<uuid>", "state": "<state>", "at": "<iso>"}
