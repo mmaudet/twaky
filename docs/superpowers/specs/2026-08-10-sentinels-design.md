@@ -327,21 +327,79 @@ Blocking is simple and readable for MVP. An async fire-and-forget variant
 (sentinel-side callback wired to `mission_changed`) is a natural future
 refinement.
 
-## 4.5 RabbitMQ subscription
+## 4.5 Event source strategies
 
-`src/twaky/sentinels/rabbitmq.py` — thin wrapper around `aio-pika`:
+A sentinel does not know how its events reach it. The framework
+provides two pluggable event source strategies; a sentinel declares
+which one via a class attribute + config, and the runtime instantiates
+the right one at boot.
+
+```python
+class EventSource(ABC):
+    """Wire events onto the runtime dispatcher."""
+    @abstractmethod
+    async def subscribe(self, on_event: Callable[[Event], Awaitable[None]]) -> None: ...
+    @abstractmethod
+    async def close(self) -> None: ...
+```
+
+### 4.5.1 `RabbitMQEventSource` (Twake-dev in-tenant flows)
+
+`src/twaky/sentinels/sources/rabbitmq.py` — thin wrapper around
+`aio-pika`:
 
 - One connection per runtime, shared across sentinels.
-- One queue per (sentinel_name, exchange), named `sentinel.<name>.<exchange>`
-  with `durable=false` and `auto_delete=false`. This is the "no-steal
-  fanout" pattern from the deploy memory: each consumer has its own
-  named queue bound to the fanout exchange, so multiple consumers get
-  their own copy of each message without stealing from other apps.
+- One queue per (sentinel_name, exchange), named
+  `sentinel.<name>.<exchange>` with `durable=true` and
+  `auto_delete=false`. This is the "no-steal fanout" pattern from the
+  deploy memory: each consumer has its own named queue bound to the
+  fanout exchange, so multiple consumers get their own copy of each
+  message without stealing from other apps.
 - Automatic reconnect with exponential backoff on connection loss.
-- Message ack after `sentinel_run` row is written (at-most-once semantics
-  from the mission point of view — a crash between `process()` and ack
-  may cause a duplicate delivery, tolerated because rules include an
-  idempotency guard on `event_ref`).
+- Message ack after `sentinel_run` row is written (at-most-once
+  semantics from the mission point of view — a crash between
+  `process()` and ack may cause a duplicate delivery, tolerated because
+  rules include an idempotency guard on `event_ref`).
+
+### 4.5.2 `JmapPollingEventSource` (Linagora prod, and any JMAP tenant)
+
+`src/twaky/sentinels/sources/jmap_poll.py`:
+
+- Config: `{endpoint, bearer_token, poll_interval_s (default 60),
+  mailbox_role (default "inbox"), sinceState (managed automatically)}`.
+- First poll: `GET /jmap/session` → capture `accountId` and `apiUrl` +
+  `POST /jmap` with `Email/query { filter: {inMailboxRole: <role>},
+  sort: [receivedAt desc], limit: 1 }` to obtain the initial `queryState`
+  without pulling the whole inbox (Linagora INBOX = 33 074 emails in the
+  probe on 2026-08-10; naive re-listing is a non-starter).
+- Subsequent polls: `POST /jmap` with a chained methodCall:
+  `Email/changes { sinceState }` → get created/updated/destroyed IDs →
+  back-reference `Email/get` for the `created` IDs only → synthesize one
+  `Event` per new email with `payload = {email_id, subject, from,
+  received_at, ...}` and `event_ref = "jmap:<accountId>:<emailId>"`.
+- New `sinceState` returned by the response is persisted into the
+  sentinel's `config_values.jmap_last_state` (JSONB path). Survives
+  runtime restart; on cold boot with a state, resume from it.
+- Token refresh path (MVP): the token is a static OIDC access-token
+  captured manually from DevTools (see § 11.5). On 401 the poller
+  logs a `token_expired` outcome, sets sentinel `enabled=false` (with
+  reason), and stops polling. Owner refreshes via UI action or by
+  re-editing `config_values.bearer_token`.
+
+Both sources emit into the same `Event` shape:
+
+```python
+class Event(TypedDict):
+    source_kind: Literal["rabbitmq", "jmap_poll"]
+    source_ref:  str    # exchange:key OR jmap accountId
+    message_id:  str    # RabbitMQ message id OR JMAP email id
+    payload:     dict
+```
+
+Idempotency guard: the runtime checks `sentinel_run` for an existing
+row with the same `event_ref = f"{source_kind}:{source_ref}:{message_id}"`
+in the last 24 h; if found, `outcome=ignored (already_processed)`. This
+tolerates JMAP polling overlap and RabbitMQ redelivery equally.
 
 ## 4.6 Registry
 
@@ -1030,9 +1088,61 @@ MAIL_SENTINEL_DEFAULT_LLMS=openrouter/moonshotai/kimi-k2-0905
 MAIL_SENTINEL_CHAT_LLMS=openrouter/moonshotai/kimi-k2-0905
 MAIL_SENTINEL_DRAFT_LLMS=openrouter/moonshotai/kimi-k2-0905
 
-# JMAP endpoint (reuse existing setting if present; else)
-JMAP_ENDPOINT=https://mail.twake-dev.maudet.cloud/jmap
+# Mail sentinel — Event source. Two supported:
+#   rabbitmq   → subscribes to mail:message:received on the local RabbitMQ
+#   jmap_poll  → polls a JMAP server for new emails (delta via Email/changes)
+MAIL_SENTINEL_EVENT_SOURCE=jmap_poll
+
+# JMAP endpoint config (only when event_source=jmap_poll).
+# Discovered on 2026-08-10 : Linagora prod uses jmap-new.linagora.com
+# with an OIDC Bearer token issued by sso.linagora.com (client_id=tmail,
+# aud=tmail, scope=openid profile email). The dev James (if you deploy
+# one) will have a different endpoint.
+MAIL_SENTINEL_JMAP_ENDPOINT=https://jmap-new.linagora.com
+MAIL_SENTINEL_JMAP_BEARER_TOKEN=  # see README §5 "Obtaining a JMAP token"
+MAIL_SENTINEL_JMAP_POLL_INTERVAL_S=60
+MAIL_SENTINEL_JMAP_MAILBOX_ROLE=inbox
 ```
+
+## 11.5 Obtaining a JMAP Bearer token (MVP procedure)
+
+Documented in README section "Sentinels · Mail — JMAP auth":
+
+**From Twake Mail (browser)**
+
+1. Open Twake Mail in a browser (e.g. `https://mail.linagora.com`) and
+   log in.
+2. Open DevTools → Network tab.
+3. Reload the inbox to trigger a JMAP request.
+4. Locate any request to `jmap-new.linagora.com`.
+5. In the request Headers pane, right-click the `authorization: bearer
+   <TOKEN>` line → *Copy value* → paste the `<TOKEN>` portion (after
+   `Bearer `) into `MAIL_SENTINEL_JMAP_BEARER_TOKEN` in `.env`.
+6. Restart `twaky-sentinel` (or wait for the next config-reload
+   NOTIFY).
+
+**Token lifetime**: current Linagora tokens live ~10 minutes (`exp` in
+the JWT payload). Auto-refresh is deferred: on 401 the poller stops
+itself and surfaces `state_reason=token_expired`. Owner refreshes
+manually.
+
+**Refresh flow (deferred to SP6b)**: LemonLDAP-NG supports refresh
+tokens; the sentinel would exchange the refresh token for a new access
+token on 401. Requires a private OAuth client credential (client secret)
+allocated for Twaky. Deferred because MVP validation does not require
+the refresh loop and the manual procedure lets us iterate quickly.
+
+**Confirmation from the 2026-08-10 probe**:
+- Session URL : `https://jmap-new.linagora.com/jmap/session`.
+- API URL : `https://jmap-new.linagora.com/jmap`.
+- Capabilities of interest: `urn:ietf:params:jmap:mail`,
+  `urn:ietf:params:jmap:submission`,
+  `com:linagora:params:jmap:filter`, `com:linagora:params:jmap:labels`,
+  `com:linagora:params:jmap:firebase:push`,
+  `com:linagora:params:jmap:websocket`.
+- Native Twake Mail extensions worth using later (SP6b) for push
+  delivery: WebSocket + Firebase push replace the polling loop with
+  sub-second latency.
 
 # 12. Task decomposition preview
 
@@ -1048,11 +1158,18 @@ Final numbering happens in `writing-plans`. Rough breakdown (~25 tasks):
   tests.
 - **T5** — `src/twaky/sentinels/delegation.py` (`delegate_to_atlas`) +
   tests.
-- **T6** — `src/twaky/sentinels/rabbitmq.py` (no-steal fanout
-  subscription) + tests.
+- **T6a** — `src/twaky/sentinels/sources/base.py` (`EventSource` ABC +
+  `Event` TypedDict) + `sources/rabbitmq.py` (no-steal fanout
+  subscription, one queue per (sentinel, exchange), durable=true,
+  reconnect with backoff) + tests.
+- **T6b** — `src/twaky/sentinels/sources/jmap_poll.py` (session
+  discovery, `Email/query` initial state, `Email/changes` delta polling,
+  `Email/get` back-reference, state persistence in
+  `config_values.jmap_last_state`, 401 → stop + surface reason) +
+  tests (fake JMAP server via httpx mock).
 - **T7** — `src/twaky/sentinels/runtime.py` (event loop, dispatch,
-  bookkeeping, housekeeping cron) + tests + integration test with real
-  RabbitMQ.
+  bookkeeping, housekeeping cron, idempotency guard on `event_ref`) +
+  tests + integration test with real RabbitMQ.
 - **T8** — `src/twaky/cli.py` gains `sentinel` subcommand +
   `docker-compose.yml` adds `twaky-sentinel` service + `.env.example`
   updates + rebuild.
@@ -1150,8 +1267,24 @@ Copy verbatim into the plan's Global Constraints block:
   `EmailSubmission/set` autonomous call = SP7 territory.
 - **Mono-user**: `settings.twaky_owner_email` implicit throughout;
   multi-owner = SP8.
+- **Event source strategies**: two pluggable implementations —
+  `RabbitMQEventSource` (Twake-dev internal flows) and
+  `JmapPollingEventSource` (external JMAP tenants, e.g. Linagora prod).
+  Selected per-sentinel via `config_values.event_source`.
 - **RabbitMQ subscription pattern**: named queue per (sentinel_name,
-  exchange), no-steal fanout family per the twake-dev deploy memory.
+  exchange), `durable=true`, `auto_delete=false`. No-steal fanout
+  family per the twake-dev deploy memory.
+- **JMAP polling pattern**: initial `Email/query` captures a
+  `queryState`, subsequent polls use `Email/changes { sinceState }`
+  chained with `Email/get` back-reference on the `created` IDs — one
+  round-trip per delta. The `sinceState` is persisted in the sentinel's
+  `config_values.jmap_last_state`. Never re-list the whole inbox.
+- **JMAP auth**: OIDC Bearer token, MVP obtained manually via DevTools
+  (see § 11.5). Auto-refresh is SP6b.
+- **Idempotency guard**: runtime consults `sentinel_run` for existing
+  rows with the same `event_ref` in the last 24 h before dispatching;
+  duplicates from RabbitMQ redelivery or JMAP polling overlap → outcome
+  `ignored (already_processed)`.
 - **Error envelope**: same shape as SP4/SP5, new codes:
   `sentinel_not_found`, `mail_rule_not_found`, `mail_memory_not_found`,
   `learned_pattern_not_found`, `validation_failed`.
