@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from psycopg import sql as pgsql
 from psycopg.rows import dict_row
 
 from twaky.db import get_pool
@@ -156,21 +157,21 @@ def list_recent(
         where_clauses.append("decided_at < %s")
         params.append(before)
 
-    if where_clauses:
-        where_sql = "WHERE " + " AND ".join(where_clauses)
-    else:
-        where_sql = ""
-
     params.append(limit)
 
-    sql = (
-        f"SELECT * FROM mail_sentinel_spam_decision "
-        f"{where_sql} "
-        f"ORDER BY decided_at DESC LIMIT %s"
-    )
+    if where_clauses:
+        query: pgsql.SQL | pgsql.Composed = pgsql.SQL(
+            "SELECT * FROM mail_sentinel_spam_decision WHERE {where} "
+            "ORDER BY decided_at DESC LIMIT %s"
+        ).format(where=pgsql.SQL(" AND ").join(pgsql.SQL(c) for c in where_clauses))
+    else:
+        query = pgsql.SQL(
+            "SELECT * FROM mail_sentinel_spam_decision "
+            "ORDER BY decided_at DESC LIMIT %s"
+        )
 
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(sql, params)
+        cur.execute(query, params)
         rows = cur.fetchall()
 
     return [_row_to_decision(r) for r in rows]

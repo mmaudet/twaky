@@ -126,40 +126,37 @@ def test_insert_returns_uuid():
 def test_list_recent_orders_desc_and_limits():
     """list_recent(limit=2) returns the 2 most-recent rows in DESC order."""
     now = datetime.now(tz=UTC)
+    t_old = now - timedelta(hours=3)
+    t_mid = now - timedelta(hours=2)
+    t_new = now - timedelta(hours=1)
 
-    uid1 = store.insert(
-        email_id="e1",
-        thread_id=None,
-        sender_email="a@b.com",
-        subject="s1",
-        received_at=now - timedelta(hours=3),
-        bucket="spam",
-        signal_source="rspamd_junk_keyword",
-        score=None,
-        reason=None,
-    )
-    uid2 = store.insert(
-        email_id="e2",
-        thread_id=None,
-        sender_email="a@b.com",
-        subject="s2",
-        received_at=now - timedelta(hours=2),
-        bucket="spam",
-        signal_source="rspamd_junk_keyword",
-        score=None,
-        reason=None,
-    )
-    uid3 = store.insert(
-        email_id="e3",
-        thread_id=None,
-        sender_email="a@b.com",
-        subject="s3",
-        received_at=now - timedelta(hours=1),
-        bucket="spam",
-        signal_source="rspamd_junk_keyword",
-        score=None,
-        reason=None,
-    )
+    # Insert via direct SQL so decided_at is controlled explicitly, avoiding
+    # clock-tick flakiness (ORDER BY is on decided_at, not received_at).
+    with psycopg.connect(_dsn(), autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO mail_sentinel_spam_decision "
+            "(email_id, sender_email, subject, received_at, bucket, signal_source, decided_at) "
+            "VALUES ('e1', 'a@b.com', 's1', %s, 'spam', 'rspamd_junk_keyword', %s) "
+            "RETURNING id",
+            (now, t_old),
+        )
+        uid1 = cur.fetchone()[0]  # type: ignore[index]
+        cur.execute(
+            "INSERT INTO mail_sentinel_spam_decision "
+            "(email_id, sender_email, subject, received_at, bucket, signal_source, decided_at) "
+            "VALUES ('e2', 'a@b.com', 's2', %s, 'spam', 'rspamd_junk_keyword', %s) "
+            "RETURNING id",
+            (now, t_mid),
+        )
+        uid2 = cur.fetchone()[0]  # type: ignore[index]
+        cur.execute(
+            "INSERT INTO mail_sentinel_spam_decision "
+            "(email_id, sender_email, subject, received_at, bucket, signal_source, decided_at) "
+            "VALUES ('e3', 'a@b.com', 's3', %s, 'spam', 'rspamd_junk_keyword', %s) "
+            "RETURNING id",
+            (now, t_new),
+        )
+        uid3 = cur.fetchone()[0]  # type: ignore[index]
 
     results = store.list_recent(limit=2)
     assert len(results) == 2
