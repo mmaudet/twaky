@@ -22,8 +22,8 @@ from twaky.sentinels.mail.adapter import MailAdapter
 from twaky.sentinels.mail.llm.hardening import Hardening
 from twaky.sentinels.mail.llm.invoke import structured_call
 from twaky.sentinels.mail.llm.tiers import UseCase
-from twaky.sentinels.mail.prompts.rules import choose_rule_prompt
-from twaky.sentinels.mail.schemas import ChooseRuleOutput
+from twaky.sentinels.mail.prompts.rules import choose_rule_prompt, learn_pattern_prompt
+from twaky.sentinels.mail.schemas import ChooseRuleOutput, LearnPatternOutput
 from twaky.sentinels.mail.state import MailAgentState
 from twaky.sentinels.mail.store import learned_patterns as lp_store
 from twaky.sentinels.mail.store import rules as rules_store
@@ -308,4 +308,126 @@ def make_match_rules(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
     return _node
 
 
-__all__ = ["NodeContext", "make_load_thread", "make_match_rules"]
+# ---------------------------------------------------------------------------
+# make_learn_pattern — fires only when matched_by == "ai"
+# ---------------------------------------------------------------------------
+
+
+def make_learn_pattern(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentState]:
+    """Factory for the learn_pattern node.
+
+    Fires only when ``matched_by == "ai"`` (routing handled by pipeline).
+    Assembles pattern history from existing records for the sender + current
+    decision; only fires LLM if ``len(history) >= 3``.
+
+    Uses ``learn_pattern_prompt`` + ``structured_call(hardening=COMPACT,
+    use_case=LEARN_PATTERN)``. If ``should_learn AND confidence >=
+    ACTIVATION_THRESHOLD`` → ``lp_store.record_decision(sender, rule,
+    confidence_hint=out.confidence)`` and returns ``{"learned_pattern": {...}}``.
+
+    Returns a node function that takes the current state and returns a
+    partial state dict with ``learned_pattern`` key (or empty dict if no
+    pattern is learned).
+
+    Parameters
+    ----------
+    ctx
+        Execution context (unused, included for consistency with other nodes).
+
+    Returns
+    -------
+    Callable
+        A node function ``(MailAgentState) -> MailAgentState``.
+    """
+
+    def _node(state: MailAgentState) -> MailAgentState:
+        # Guard: skip if rule_name is None
+        rule_name = state.get("rule_name")
+        if rule_name is None:
+            return {}
+
+        # Guard: skip if thread is empty
+        thread: list[dict[str, Any]] = state.get("thread") or []
+        if not thread:
+            return {}
+
+        latest = thread[-1]
+
+        # Guard: skip if sender missing
+        try:
+            sender = _sender_email(latest)
+        except (KeyError, IndexError, TypeError):
+            return {}
+
+        # Build history: fetch all patterns for sender, filter in-process,
+        # format each + append current decision
+        all_patterns = lp_store.list_all(active_only=False)
+        sender_patterns = [p for p in all_patterns if p.sender_email == sender]
+
+        history: list[dict[str, Any]] = [
+            {
+                "received_at": p.last_confirmed.isoformat(),
+                "subject": "",
+                "rule_name": p.rule_name,
+            }
+            for p in sender_patterns
+        ]
+
+        # Append current decision
+        history.append(
+            {
+                "received_at": latest.get("receivedAt", ""),
+                "subject": latest.get("subject", ""),
+                "rule_name": rule_name,
+            }
+        )
+
+        # Threshold gate: count total decisions (evidence_count from patterns + current)
+        # If < 3 → no LLM call
+        total_decisions = sum(p.evidence_count for p in sender_patterns) + 1
+        if total_decisions < 3:
+            return {}
+
+        # LLM call
+        prompt = learn_pattern_prompt(sender_email=sender, recent_history=history)
+        output: LearnPatternOutput = structured_call(
+            prompt,
+            LearnPatternOutput,
+            hardening=Hardening.COMPACT,
+            use_case=UseCase.LEARN_PATTERN,
+        )
+
+        # Persist only if should_learn AND confidence >= ACTIVATION_THRESHOLD
+        if output.should_learn and output.confidence >= float(
+            lp_store.ACTIVATION_THRESHOLD
+        ):
+            p = lp_store.record_decision(
+                sender,
+                rule_name,
+                confidence_hint=output.confidence,
+            )
+            log.debug(
+                "learn_pattern: recorded pattern for %s → %s (confidence=%.2f)",
+                sender,
+                rule_name,
+                p.confidence,
+            )
+            return {
+                "learned_pattern": {
+                    "sender": sender,
+                    "rule": rule_name,
+                    "confidence": float(p.confidence),
+                }
+            }
+
+        return {}
+
+    return _node
+
+
+__all__ = [
+    "NodeContext",
+    "make_learn_pattern",
+    "make_load_thread",
+    "make_match_rules",
+]
