@@ -15,6 +15,7 @@ Restore semantics (JMAP-first, two-phase):
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
@@ -32,6 +33,8 @@ from twaky.sentinels.mail.adapter import JmapMailAdapter
 from twaky.sentinels.mail.store import spam_decisions
 
 router = APIRouter(prefix="/mail-sentinel/spam", tags=["mail-sentinel-spam"])
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -172,9 +175,10 @@ def restore(
             },
         )
     except Exception as e:  # noqa: BLE001
+        log.exception("JMAP restore failed for decision %s", decision_id)
         return error_response(
             code="jmap_restore_failed",
-            message=str(e),
+            message=f"{type(e).__name__}: JMAP server rejected the restore request",
             status_code=502,
         )
 

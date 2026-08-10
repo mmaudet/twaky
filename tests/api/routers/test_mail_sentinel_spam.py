@@ -225,6 +225,12 @@ def test_restore_502_when_jmap_fails(monkeypatch):
     assert r.status_code == 502
     assert r.json()["error"]["code"] == "jmap_restore_failed"
 
+    # The error message must be sanitized — no JMAP session URL or hostname leakage
+    error_message = r.json()["error"]["message"]
+    assert "jmap" not in error_message.lower() or "rejected the restore request" in error_message
+    # Raw exception string must not bleed through (no JMAP server error string)
+    assert "JMAP server error" not in error_message
+
     # DB must NOT have been touched — restored_at should still be None
     refetch = spam_decisions.get(row.id)
     assert refetch is not None

@@ -55,11 +55,11 @@ const SENTINEL_ON = {
 }
 
 const SAMPLE_STATS = {
-    spam: 10,
-    newsletter: 3,
+    spam: 3,
+    newsletter: 2,
     phishing_alert: 1,
-    restored: 2,
-    total_processed: 14,
+    restored: 1,
+    total_processed: 6,
 }
 
 const SAMPLE_DECISIONS = [
@@ -164,8 +164,15 @@ describe('RecentSpamTab', () => {
         const toggle = screen.getByRole('switch', { name: /spam filter/i })
         expect((toggle as HTMLInputElement).getAttribute('data-state')).toBe('checked')
 
-        // Should show stats line
-        expect(screen.getByText(/last 30 days/i)).toBeTruthy()
+        // Should show stats line with correct breakdown:
+        // spam(3) + phishing_alert(1) = 4 archived, newsletter(2) labeled, restored(1) restored
+        const statsLine = screen.getByText(/last 30 days/i)
+        expect(statsLine).toBeTruthy()
+        expect(statsLine.textContent).toContain('4 archived')
+        expect(statsLine.textContent).toContain('2 labeled')
+        expect(statsLine.textContent).toContain('1 restored')
+        // newsletter must NOT be counted in "archived"
+        expect(statsLine.textContent).not.toContain('6 archived')
 
         // Should show "on, no decisions" empty state
         expect(screen.getByText(/spam filter is on, no decisions yet/i)).toBeTruthy()

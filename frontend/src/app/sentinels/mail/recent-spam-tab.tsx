@@ -182,7 +182,7 @@ export function RecentSpamTab() {
 
                 {stats && (
                     <p className="text-sm text-muted-foreground">
-                        Last 30 days &middot; {stats.spam + stats.newsletter + stats.phishing_alert} archived &middot; {stats.restored} restored
+                        Last 30 days &middot; {stats.spam + stats.phishing_alert} archived &middot; {stats.newsletter} labeled &middot; {stats.restored} restored
                     </p>
                 )}
 
