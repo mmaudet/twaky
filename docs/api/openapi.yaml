@@ -297,6 +297,46 @@ paths:
           content:
             application/json:
               schema: {}
+  /oauth/jmap/login:
+    get:
+      tags:
+      - oauth-jmap
+      summary: Jmap Login
+      description: Kick off the JMAP OAuth Authorization Code + PKCE flow.
+      operationId: jmap_login_oauth_jmap_login_get
+      parameters:
+      - name: return_to
+        in: query
+        required: false
+        schema:
+          type: string
+          default: /sentinels/mail?tab=auth
+          title: Return To
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /oauth/jmap/callback:
+    get:
+      tags:
+      - oauth-jmap
+      summary: Jmap Callback
+      description: Handle JMAP OAuth provider callback, exchange code, store credential.
+      operationId: jmap_callback_oauth_jmap_callback_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
   /events:
     get:
       tags:
