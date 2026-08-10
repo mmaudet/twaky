@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -50,11 +51,23 @@ class _SingleResponseTransport(httpx.MockTransport):
         return self._response
 
 
+class _MultiResponseTransport(httpx.MockTransport):
+    """MockTransport that returns responses from a queue, one per call."""
+
+    def __init__(self, responses: list[httpx.Response]) -> None:
+        self._responses = list(responses)
+        self.requests: list[httpx.Request] = []
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return self._responses.pop(0)
+
+
 def _adapter(transport: _SingleResponseTransport) -> JmapMailAdapter:
     """Construct a JmapMailAdapter and swap in the mock transport."""
     adapter = JmapMailAdapter(
         session_url="https://jmap.example.com/session",
-        bearer_token="tok",
+        token_provider=lambda: "test-token",
         account_id="acct-abc",
         api_url="https://jmap.example.com/jmap",
     )
@@ -178,3 +191,82 @@ class TestJmapMailAdapter:
 
         # The implementation returns the key (client-side name "draft1")
         assert draft_id == "draft1"
+
+    def test_adapter_401_calls_refresh_now_and_retries(self) -> None:
+        """On 401, refresh_now is called and request is retried with fresh token."""
+        counter: list[int] = [0]
+
+        def token_provider() -> str:
+            counter[0] += 1
+            return f"token-{counter[0]}"
+
+        refresh_now = MagicMock()
+
+        email_body = _jmap_response(
+            "Email/get",
+            {"list": [{"id": "eml-1", "threadId": "t-1", "subject": "Hello"}]},
+        )
+        # raw 401 response (no JSON body required)
+        resp_401 = httpx.Response(401, content=b"Unauthorized")
+
+        transport = _MultiResponseTransport([resp_401, email_body])
+
+        adapter = JmapMailAdapter(
+            session_url="https://jmap.example.com/session",
+            token_provider=token_provider,
+            refresh_now=refresh_now,
+            account_id="acct-abc",
+            api_url="https://jmap.example.com/jmap",
+        )
+        adapter._client = httpx.Client(transport=transport)
+
+        result = adapter.get_email("eml-1")
+
+        refresh_now.assert_called_once()
+        assert result["id"] == "eml-1"
+        # Second request must carry token-2 (the token returned after refresh call)
+        second_auth = transport.requests[1].headers["authorization"]
+        assert second_auth == "Bearer token-2"
+
+    def test_adapter_401_without_refresh_now_reraises(self) -> None:
+        """Without refresh_now, a 401 response raises HTTPStatusError immediately."""
+        transport = _MultiResponseTransport(
+            [httpx.Response(401, content=b"Unauthorized")]
+        )
+
+        adapter = JmapMailAdapter(
+            session_url="https://jmap.example.com/session",
+            token_provider=lambda: "tok",
+            refresh_now=None,
+            account_id="acct-abc",
+            api_url="https://jmap.example.com/jmap",
+        )
+        adapter._client = httpx.Client(transport=transport)
+
+        with pytest.raises(httpx.HTTPStatusError):
+            adapter.get_email("eml-1")
+
+    def test_adapter_double_401_reraises(self) -> None:
+        """When both the initial request and retry return 401, HTTPStatusError is raised."""
+        refresh_now = MagicMock()
+
+        transport = _MultiResponseTransport(
+            [
+                httpx.Response(401, content=b"Unauthorized"),
+                httpx.Response(401, content=b"Unauthorized"),
+            ]
+        )
+
+        adapter = JmapMailAdapter(
+            session_url="https://jmap.example.com/session",
+            token_provider=lambda: "tok",
+            refresh_now=refresh_now,
+            account_id="acct-abc",
+            api_url="https://jmap.example.com/jmap",
+        )
+        adapter._client = httpx.Client(transport=transport)
+
+        with pytest.raises(httpx.HTTPStatusError):
+            adapter.get_email("eml-1")
+
+        refresh_now.assert_called_once()
