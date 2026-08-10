@@ -57,11 +57,12 @@ pytestmark = [
 
 @pytest.fixture(autouse=True)
 def _wipe():
-    """Wipe rules, memories, and patterns tables before/after each test."""
+    """Wipe rules, memories, patterns, and spam decisions tables before/after each test."""
     tables = [
         "mail_sentinel_rule",
         "mail_sentinel_memory",
         "mail_sentinel_learned_pattern",
+        "mail_sentinel_spam_decision",
     ]
     with psycopg.connect(_dsn(), autocommit=True) as conn, conn.cursor() as cur:
         for table in tables:
@@ -90,9 +91,9 @@ def _make_email(
     }
 
 
-def _ctx(adapter: InMemoryMailAdapter, base: MagicMock | None = None) -> NodeContext:
+def _ctx(adapter: InMemoryMailAdapter, base: MagicMock | None = None, config_values: dict | None = None) -> NodeContext:
     b = base if base is not None else MagicMock()
-    b.sentinel_row.config_values = {}
+    b.sentinel_row.config_values = config_values or {}
     return NodeContext(base=b, mail=adapter, owner_email="me@x.com")
 
 
@@ -194,3 +195,128 @@ class TestEndToEndAiMatchedDraftReply:
 
         # Assert mission emitted
         base.mission_emitter.emit.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Test: spam_triage routing — spam bucket ends early
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineSpamBucketEndsEarly:
+    """spam_triage detects spam → routes to END, no downstream nodes run."""
+
+    def test_pipeline_spam_bucket_ends_early(self) -> None:
+        # Arrange: email with $junk keyword (will be caught by spam_triage stage 1)
+        email = _make_email("e1", subject="$junk keyword test", from_addr="spam@x.com")
+        # Add $junk keyword to trigger spam detection
+        email["keywords"] = {"$junk": True}
+
+        adapter = InMemoryMailAdapter(seed={"e1": email})
+        ctx = _ctx(adapter, config_values={"spam_filter_enabled": True})
+
+        # Allow thread_status call but it shouldn't happen if routing works
+        def _fake_llm(prompt: Any, schema: Any, **kwargs: Any) -> Any:
+            if schema is ThreadStatusOutput:
+                # If we get here, routing to END didn't work
+                raise AssertionError(
+                    "thread_status should not be called when spam_bucket routes to END"
+                )
+            raise AssertionError(f"Unexpected structured_call for schema {schema}")
+
+        with patch(
+            "twaky.sentinels.mail.nodes.structured_call",
+            side_effect=_fake_llm,
+        ):
+            state = process_email(ctx, "e1")
+
+        # Assert: spam_bucket is set, status is None (thread_status never ran)
+        assert state.get("spam_bucket") == "spam", f"Expected spam_bucket='spam', got {state.get('spam_bucket')}"
+        assert state.get("status") is None, f"Expected status=None, got {state.get('status')}"
+        # Assert actions_applied was set by spam_triage (labeling, keyword)
+        actions = state.get("actions_applied", [])
+        assert "label:__spam__" in actions, f"Expected 'label:__spam__' in actions, got {actions}"
+        assert "keyword:$junk" in actions, f"Expected 'keyword:$junk' in actions, got {actions}"
+        # Assert email was labeled
+        assert "e1" in adapter._labels, f"Expected email e1 to be labeled, labels: {adapter._labels}"
+        assert "__spam__" in adapter._labels["e1"]
+        # Assert draft was not created
+        assert state.get("draft") is None
+        # Assert no rules were evaluated
+        assert state.get("matched_by") is None
+
+
+# ---------------------------------------------------------------------------
+# Test: spam_triage routing — newsletter bucket continues
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineNewsletterBucketContinues:
+    """spam_triage detects newsletter → continues to match_rules, downstream runs."""
+
+    def test_pipeline_newsletter_bucket_continues(self) -> None:
+        # Arrange: email with newsletter heuristic markers
+        email = _make_email("e1", subject="Newsletter", from_addr="news@x.com")
+        # Add list-unsubscribe headers to trigger newsletter heuristic
+        # Also add DKIM to keep score low (list-unsub=2, dkim present so no +3)
+        email["headers"] = [
+            {"name": "list-unsubscribe", "value": "<mailto:unsub@x.com>"},
+            {"name": "list-unsubscribe-post", "value": "List-Unsubscribe=One-Click"},
+            {"name": "dkim-signature", "value": "v=1; a=rsa-sha256; ..."},
+        ]
+
+        adapter = InMemoryMailAdapter(seed={"e1": email})
+        ctx = _ctx(adapter, config_values={"spam_filter_enabled": True})
+
+        # Per-use-case fake LLM (only thread_status should be called, not match_rules AI)
+        def _fake_llm(prompt: Any, schema: Any, **kwargs: Any) -> Any:
+            if schema is ThreadStatusOutput:
+                return ThreadStatusOutput(status=ThreadStatus.FYI)
+            raise AssertionError(f"Unexpected structured_call for schema {schema}")
+
+        with patch(
+            "twaky.sentinels.mail.nodes.structured_call",
+            side_effect=_fake_llm,
+        ):
+            state = process_email(ctx, "e1")
+
+        # Assert: spam_bucket is newsletter, status IS set (thread_status ran)
+        assert state.get("spam_bucket") == "newsletter"
+        assert state.get("status") == ThreadStatus.FYI
+        # Assert email was labeled
+        assert "e1" in adapter._labels
+        assert "newsletter" in adapter._labels["e1"]
+
+
+# ---------------------------------------------------------------------------
+# Test: spam_triage routing — no spam detection, passes through
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineBucketNonePassesThrough:
+    """spam_triage sees no spam signals → bucket=None, pipeline continues normally."""
+
+    def test_pipeline_bucket_none_passes_through_unchanged(self) -> None:
+        # Arrange: plain legitimate email with no spam markers
+        email = _make_email("e1", subject="Normal email", from_addr="alice@acme.com")
+
+        adapter = InMemoryMailAdapter(seed={"e1": email})
+        ctx = _ctx(adapter, config_values={"spam_filter_enabled": True})
+
+        # Per-use-case fake LLM
+        def _fake_llm(prompt: Any, schema: Any, **kwargs: Any) -> Any:
+            if schema is ThreadStatusOutput:
+                return ThreadStatusOutput(status=ThreadStatus.FYI)
+            raise AssertionError(f"Unexpected structured_call for schema {schema}")
+
+        with patch(
+            "twaky.sentinels.mail.nodes.structured_call",
+            side_effect=_fake_llm,
+        ):
+            state = process_email(ctx, "e1")
+
+        # Assert: spam_bucket is None, pipeline continued normally
+        assert state.get("spam_bucket") is None
+        # Assert status was set by thread_status (pipeline ran)
+        assert state.get("status") == ThreadStatus.FYI
+        # Assert matched_by was set (match_rules ran, returned "none" since no rules matched)
+        assert state.get("matched_by") == "none"

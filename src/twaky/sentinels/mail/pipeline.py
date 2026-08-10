@@ -4,6 +4,10 @@ Graph shape (see spec §6.10):
 
     load_thread
         │
+    spam_triage
+        │
+        ├─ bucket in {spam, phishing-alert} ──> END
+        │
     match_rules ─────────────────────────────┐
         │ (matched_by == "ai")               │
     learn_pattern                            │
@@ -30,6 +34,7 @@ from twaky.sentinels.mail.nodes import (
     make_load_thread,
     make_match_rules,
     make_select_memories,
+    make_spam_triage,
     make_thread_status,
 )
 from twaky.sentinels.mail.state import MailAgentState, ThreadStatus
@@ -55,6 +60,11 @@ def build_graph(ctx: NodeContext):
         A compiled LangGraph app ready for ``.invoke()``.
     """
 
+    def _route_after_spam_triage(state: MailAgentState) -> str:
+        if state.get("spam_bucket") in {"spam", "phishing-alert"}:
+            return END
+        return "match_rules"
+
     def _route_after_status(state: MailAgentState) -> str:
         if state.get("status") is not ThreadStatus.TO_REPLY:
             return END
@@ -69,6 +79,7 @@ def build_graph(ctx: NodeContext):
     graph: StateGraph = StateGraph(MailAgentState)
 
     graph.add_node("load_thread", make_load_thread(ctx))  # type: ignore[call-overload]
+    graph.add_node("spam_triage", make_spam_triage(ctx))  # type: ignore[call-overload]
     graph.add_node("match_rules", make_match_rules(ctx))  # type: ignore[call-overload]
     graph.add_node("learn_pattern", make_learn_pattern(ctx))  # type: ignore[call-overload]
     graph.add_node("apply_actions", make_apply_actions(ctx))  # type: ignore[call-overload]
@@ -77,7 +88,12 @@ def build_graph(ctx: NodeContext):
     graph.add_node("draft_reply", make_draft_reply(ctx))  # type: ignore[call-overload]
 
     graph.add_edge(START, "load_thread")
-    graph.add_edge("load_thread", "match_rules")
+    graph.add_edge("load_thread", "spam_triage")
+    graph.add_conditional_edges(
+        "spam_triage",
+        _route_after_spam_triage,
+        {"match_rules": "match_rules", END: END},
+    )
     graph.add_conditional_edges(
         "match_rules",
         _route_after_match,
