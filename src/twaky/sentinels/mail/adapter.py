@@ -67,6 +67,14 @@ class MailAdapter(Protocol):
         """Save a draft reply and return the assigned draft id."""
         ...
 
+    def set_keyword(self, email_id: str, keyword: str, value: bool) -> None:
+        """Set a single keyword on an email to a boolean value."""
+        ...
+
+    def set_keywords_bulk(self, email_id: str, patches: dict[str, bool]) -> None:
+        """Atomically set multiple keywords on an email in a single operation."""
+        ...
+
 
 class InMemoryMailAdapter:
     """In-memory mail adapter for tests and eval fixtures.
@@ -85,6 +93,7 @@ class InMemoryMailAdapter:
         self._archived: set[str] = set()
         self._read: set[str] = set()
         self._drafts: list[dict[str, Any]] = []
+        self._keywords: dict[str, dict[str, bool]] = {}
 
     # ------------------------------------------------------------------
     # Helper
@@ -133,6 +142,15 @@ class InMemoryMailAdapter:
             }
         )
         return draft_id
+
+    def set_keyword(self, email_id: str, keyword: str, value: bool) -> None:
+        """Store a single keyword value for an email."""
+        self._keywords.setdefault(email_id, {})[keyword] = value
+
+    def set_keywords_bulk(self, email_id: str, patches: dict[str, bool]) -> None:
+        """Store multiple keyword values for an email."""
+        for k, v in patches.items():
+            self.set_keyword(email_id, k, v)
 
 
 class JmapMailAdapter:
@@ -314,6 +332,27 @@ class JmapMailAdapter:
         )
         created: dict[str, Any] = result.get("created", {})
         return next(iter(created.keys()))
+
+    def set_keyword(self, email_id: str, keyword: str, value: bool) -> None:
+        """Set a single keyword on an email via ``Email/set``."""
+        self._call(
+            "Email/set",
+            {
+                "update": {
+                    email_id: {f"keywords/{keyword}": value},
+                },
+            },
+        )
+
+    def set_keywords_bulk(self, email_id: str, patches: dict[str, bool]) -> None:
+        """Atomically set multiple keywords on an email in a single ``Email/set`` call."""
+        patch_dict = {f"keywords/{k}": v for k, v in patches.items()}
+        self._call(
+            "Email/set",
+            {
+                "update": {email_id: patch_dict},
+            },
+        )
 
 
 __all__ = ["InMemoryMailAdapter", "JmapMailAdapter", "MailAdapter"]

@@ -139,6 +139,26 @@ class TestInMemoryMailAdapter:
         assert adapter._drafts[1]["body"] == "Bonjour"
         assert adapter._drafts[1]["language"] == "fr"
 
+    def test_in_memory_set_keyword_stores(self) -> None:
+        """set_keyword stores a keyword value in the _keywords dict."""
+        adapter = InMemoryMailAdapter()
+        adapter.set_keyword("e1", "$junk", True)
+        assert adapter._keywords["e1"]["$junk"] is True
+
+    def test_in_memory_set_keyword_can_clear(self) -> None:
+        """set_keyword can set a keyword to False (clearing it)."""
+        adapter = InMemoryMailAdapter()
+        adapter.set_keyword("e1", "$junk", True)
+        adapter.set_keyword("e1", "$junk", False)
+        assert adapter._keywords["e1"]["$junk"] is False
+
+    def test_in_memory_set_keywords_bulk_all_at_once(self) -> None:
+        """set_keywords_bulk stores multiple keywords for an email."""
+        adapter = InMemoryMailAdapter()
+        adapter.set_keywords_bulk("e1", {"$junk": True, "nonjunk": False})
+        assert adapter._keywords["e1"]["$junk"] is True
+        assert adapter._keywords["e1"]["nonjunk"] is False
+
 
 # ---------------------------------------------------------------------------
 # JmapMailAdapter tests (via httpx.MockTransport)
@@ -270,3 +290,36 @@ class TestJmapMailAdapter:
             adapter.get_email("eml-1")
 
         refresh_now.assert_called_once()
+
+    def test_jmap_set_keyword_calls_email_set(self) -> None:
+        """set_keyword posts Email/set with keywords/<name>: value."""
+        transport = _SingleResponseTransport(
+            _jmap_response("Email/set", {"updated": {"e1": None}})
+        )
+        adapter = _adapter(transport)
+        adapter.set_keyword("e1", "$junk", True)
+
+        assert transport.last_request is not None
+        body = json.loads(transport.last_request.content)
+        method_calls = body["methodCalls"]
+        assert method_calls[0][0] == "Email/set"
+        args = method_calls[0][1]
+        assert args["update"] == {"e1": {"keywords/$junk": True}}
+
+    def test_jmap_set_keywords_bulk_single_call(self) -> None:
+        """set_keywords_bulk posts Email/set with all keywords in a single update patch."""
+        transport = _SingleResponseTransport(
+            _jmap_response("Email/set", {"updated": {"e1": None}})
+        )
+        adapter = _adapter(transport)
+        adapter.set_keywords_bulk("e1", {"$junk": True, "nonjunk": False})
+
+        assert transport.last_request is not None
+        body = json.loads(transport.last_request.content)
+        method_calls = body["methodCalls"]
+        assert method_calls[0][0] == "Email/set"
+        args = method_calls[0][1]
+        # Both keywords should be in a single update patch
+        assert args["update"] == {
+            "e1": {"keywords/$junk": True, "keywords/nonjunk": False}
+        }
