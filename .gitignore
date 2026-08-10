@@ -15,6 +15,7 @@ wheels/
 # Secrets
 .env
 .env.local
+.env.bak-*
 
 # Editor / OS
 .DS_Store
