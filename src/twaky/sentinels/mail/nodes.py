@@ -22,11 +22,18 @@ from twaky.sentinels.mail.adapter import MailAdapter
 from twaky.sentinels.mail.llm.hardening import Hardening
 from twaky.sentinels.mail.llm.invoke import structured_call
 from twaky.sentinels.mail.llm.tiers import UseCase
+from twaky.sentinels.mail.prompts.memories import select_memories_prompt
 from twaky.sentinels.mail.prompts.rules import choose_rule_prompt, learn_pattern_prompt
 from twaky.sentinels.mail.prompts.thread_status import thread_status_prompt
-from twaky.sentinels.mail.schemas import ChooseRuleOutput, LearnPatternOutput, ThreadStatusOutput
+from twaky.sentinels.mail.schemas import (
+    ChooseRuleOutput,
+    LearnPatternOutput,
+    SelectMemoriesOutput,
+    ThreadStatusOutput,
+)
 from twaky.sentinels.mail.state import MailAgentState, ThreadStatus
 from twaky.sentinels.mail.store import learned_patterns as lp_store
+from twaky.sentinels.mail.store import memories as mem_store
 from twaky.sentinels.mail.store import rules as rules_store
 
 if TYPE_CHECKING:
@@ -581,11 +588,98 @@ def make_thread_status(ctx: NodeContext) -> Callable[[MailAgentState], MailAgent
     return _node
 
 
+def make_select_memories(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentState]:
+    """Factory for the select_memories node.
+
+    Two-stage pipeline: candidate_pool → LLM narrow.
+
+    1. If thread is empty, return ``{"memory_ids": []}`` without DB/LLM calls.
+    2. Extract sender email from latest email in thread.
+    3. Read config: ``pool_size = ctx.base.sentinel_row.config_values.get("memory_candidate_pool", 100)``
+       and ``max_inject = ctx.base.sentinel_row.config_values.get("memory_inject_max", 16)``.
+    4. Query ``mem_store.candidate_pool(sender, limit=pool_size)`` for non-expired memories.
+    5. If pool is empty, return ``{"memory_ids": []}`` without LLM call.
+    6. Otherwise call LLM with ``select_memories_prompt(state, pool_dict_list)``
+       → ``SelectMemoriesOutput`` with ``hardening=COMPACT, use_case=SELECT_MEMORIES``.
+    7. Return ``{"memory_ids": out.memory_ids[:max_inject]}``.
+
+    Returns a node function that takes the current state and returns a
+    partial state dict with ``memory_ids`` key.
+
+    Parameters
+    ----------
+    ctx
+        Execution context (base.sentinel_row.config_values, mail adapter).
+
+    Returns
+    -------
+    Callable
+        A node function ``(MailAgentState) -> MailAgentState``.
+    """
+
+    def _node(state: MailAgentState) -> MailAgentState:
+        thread: list[dict[str, Any]] = state.get("thread") or []
+
+        # Stage 0: Empty thread → return early
+        if not thread:
+            return {"memory_ids": []}
+
+        latest = thread[-1]
+
+        # Stage 1: Extract sender
+        try:
+            sender = _sender_email(latest)
+        except (KeyError, IndexError, TypeError):
+            return {"memory_ids": []}
+
+        # Stage 2: Read config
+        pool_size = ctx.base.sentinel_row.config_values.get(
+            "memory_candidate_pool", 100
+        )
+        max_inject = ctx.base.sentinel_row.config_values.get(
+            "memory_inject_max", 16
+        )
+
+        # Stage 3: Query candidate pool
+        pool = mem_store.candidate_pool(sender, limit=pool_size)
+
+        # Stage 4: Empty pool → return early
+        if not pool:
+            return {"memory_ids": []}
+
+        # Stage 5: Build pool dicts for LLM
+        pool_dicts = [
+            {
+                "id": str(m.id),
+                "kind": m.kind,
+                "scope": m.scope,
+                "scope_value": m.scope_value,
+                "content": m.content,
+            }
+            for m in pool
+        ]
+
+        # Stage 6: Call LLM
+        prompt = select_memories_prompt(state, pool_dicts)
+        output: SelectMemoriesOutput = structured_call(
+            prompt,
+            SelectMemoriesOutput,
+            hardening=Hardening.COMPACT,
+            use_case=UseCase.SELECT_MEMORIES,
+        )
+
+        # Stage 7: Return bounded memory ids
+        return {"memory_ids": output.memory_ids[:max_inject]}
+
+    return _node
+
+
 __all__ = [
     "NodeContext",
     "make_apply_actions",
     "make_learn_pattern",
     "make_load_thread",
     "make_match_rules",
+    "make_select_memories",
     "make_thread_status",
 ]
