@@ -638,6 +638,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mail-sentinel/spam": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Spam
+         * @description Return recent spam decisions ordered by decided_at DESC.
+         *
+         *     Optionally filter by ``bucket`` (``spam``, ``newsletter``,
+         *     ``phishing-alert``) and/or cursor ``before`` (ISO-8601 datetime).
+         *     ``limit`` is bounded 1..500, defaulting to 50.
+         */
+        get: operations["list_spam_mail_sentinel_spam_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail-sentinel/spam/{decision_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore
+         * @description Restore a spam-archived email to the inbox.
+         *
+         *     JMAP-first two-phase: patches keywords on the JMAP server before touching
+         *     the DB, so a JMAP failure leaves state consistent (DB not modified).
+         *
+         *     Error codes
+         *     -----------
+         *     404 spam_decision_not_found
+         *         No decision row with the given id.
+         *     409 already_restored
+         *         The decision was already restored.
+         *     502 jmap_restore_failed
+         *         JMAP server returned an error; DB was not modified.
+         */
+        post: operations["restore_mail_sentinel_spam__decision_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail-sentinel/spam/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stats
+         * @description Return aggregated spam decision counts for the last ``days`` days.
+         *
+         *     Returns counts for ``spam``, ``newsletter``, ``phishing_alert``,
+         *     ``restored``, and ``total_processed`` buckets.
+         */
+        get: operations["get_stats_mail_sentinel_spam_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1268,6 +1347,63 @@ export interface components {
             bound_agents?: ("atlas" | "chronos" | "plume" | "iris")[] | null;
             /** Enabled */
             enabled?: boolean | null;
+        };
+        /**
+         * SpamDecision
+         * @description Full representation of a mail_sentinel_spam_decision row.
+         */
+        SpamDecision: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Email Id */
+            email_id: string;
+            /** Thread Id */
+            thread_id: string | null;
+            /** Sender Email */
+            sender_email: string;
+            /** Subject */
+            subject: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Bucket */
+            bucket: string;
+            /** Signal Source */
+            signal_source: string;
+            /** Score */
+            score: number | null;
+            /** Reason */
+            reason: string | null;
+            /** Restored At */
+            restored_at: string | null;
+            /** Restored By */
+            restored_by: string | null;
+            /**
+             * Decided At
+             * Format: date-time
+             */
+            decided_at: string;
+        };
+        /**
+         * SpamStats
+         * @description Aggregated counts for the /mail-sentinel/spam/stats endpoint.
+         */
+        SpamStats: {
+            /** Spam */
+            spam: number;
+            /** Newsletter */
+            newsletter: number;
+            /** Phishing Alert */
+            phishing_alert: number;
+            /** Restored */
+            restored: number;
+            /** Total Processed */
+            total_processed: number;
         };
         /**
          * Stats24h
@@ -2443,6 +2579,101 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthStatus"];
+                };
+            };
+        };
+    };
+    list_spam_mail_sentinel_spam_get: {
+        parameters: {
+            query?: {
+                bucket?: string | null;
+                limit?: number;
+                before?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpamDecision"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_mail_sentinel_spam__decision_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                decision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpamDecision"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stats_mail_sentinel_spam_stats_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpamStats"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
