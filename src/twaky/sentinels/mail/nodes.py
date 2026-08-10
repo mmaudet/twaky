@@ -15,8 +15,10 @@ import fnmatch
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from twaky.sentinels.mail.adapter import MailAdapter
 from twaky.sentinels.mail.llm.hardening import Hardening
@@ -25,18 +27,21 @@ from twaky.sentinels.mail.llm.tiers import UseCase
 from twaky.sentinels.mail.prompts.draft_reply import draft_reply_prompt
 from twaky.sentinels.mail.prompts.memories import select_memories_prompt
 from twaky.sentinels.mail.prompts.rules import choose_rule_prompt, learn_pattern_prompt
+from twaky.sentinels.mail.prompts.spam_check import spam_check_prompt
 from twaky.sentinels.mail.prompts.thread_status import thread_status_prompt
 from twaky.sentinels.mail.schemas import (
     ChooseRuleOutput,
     DraftReplyOutput,
     LearnPatternOutput,
     SelectMemoriesOutput,
+    SpamCheckOutput,
     ThreadStatusOutput,
 )
 from twaky.sentinels.mail.state import MailAgentState, ThreadStatus
 from twaky.sentinels.mail.store import learned_patterns as lp_store
 from twaky.sentinels.mail.store import memories as mem_store
 from twaky.sentinels.mail.store import rules as rules_store
+from twaky.sentinels.mail.store import spam_decisions
 
 if TYPE_CHECKING:
     from twaky.sentinels.base import Context
@@ -777,6 +782,332 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
     return _node
 
 
+# ---------------------------------------------------------------------------
+# make_spam_triage — 5-stage rspamd-first spam filter node (SP6c T6)
+# ---------------------------------------------------------------------------
+
+# Heuristic score thresholds
+_HEURISTIC_NEWSLETTER_MAX_SCORE = 5
+_HEURISTIC_GREY_MIN_SCORE = 4
+
+# Regex to parse rspamd action from org.apache.james.rspamd.status header
+_RSPAMD_ACTION_RE = re.compile(r"action=([\w\s]+?)(?:;|$)", re.IGNORECASE)
+
+
+def _parse_rspamd_status(headers: list[dict[str, Any]]) -> str | None:
+    """Parse the rspamd action from org.apache.james.rspamd.status header.
+
+    Returns the action string (lowercased, stripped) or None if the header
+    is absent or the action component is missing.
+    """
+    for h in headers:
+        if h.get("name", "").lower() == "org.apache.james.rspamd.status":
+            m = _RSPAMD_ACTION_RE.search(h.get("value", ""))
+            if m:
+                return m.group(1).strip().lower()
+    return None
+
+
+@dataclass
+class _HeuristicResult:
+    """Result of the header-based heuristic scoring."""
+
+    total_score: int
+    newsletter_signal: bool
+    summary: dict[str, Any] = field(default_factory=dict)
+
+
+def _header_heuristic_score(email: dict[str, Any]) -> _HeuristicResult:
+    """Compute a small integer heuristic score from email headers.
+
+    Score contributions:
+      +2  if both list-unsubscribe AND list-unsubscribe-post headers present
+      +3  if dkim-signature absent
+      +3  if return-path domain != from domain (sender mismatch)
+      +2  if hasAttachment AND dkim absent
+
+    ``newsletter_signal`` is set when both list-unsubscribe headers are present.
+    """
+    headers: list[dict[str, Any]] = email.get("headers") or []
+    # Build a lower-cased header-name → value dict (last value wins on dup)
+    h: dict[str, str] = {}
+    for hdr in headers:
+        name = hdr.get("name", "").lower()
+        if name:
+            h[name] = hdr.get("value", "")
+
+    list_unsub_present = "list-unsubscribe" in h and "list-unsubscribe-post" in h
+    dkim_present = "dkim-signature" in h
+    has_attachment = bool(email.get("hasAttachment", False))
+
+    # Extract from domain
+    from_list = email.get("from") or []
+    from_email = from_list[0].get("email", "") if from_list else ""
+    from_domain = from_email.split("@")[-1].lower() if "@" in from_email else ""
+
+    # Extract return-path domain
+    return_path_val = h.get("return-path", "")
+    rp_email = return_path_val.strip("<>").strip()
+    rp_domain = rp_email.split("@")[-1].lower() if "@" in rp_email else ""
+    return_path_mismatch = bool(from_domain and rp_domain and from_domain != rp_domain)
+
+    score = 0
+    if list_unsub_present:
+        score += 2
+    if not dkim_present:
+        score += 3
+    if return_path_mismatch:
+        score += 3
+    if has_attachment and not dkim_present:
+        score += 2
+
+    summary: dict[str, Any] = {
+        "list_unsubscribe": list_unsub_present,
+        "dkim_present": dkim_present,
+        "return_path_mismatch": return_path_mismatch,
+        "has_attachment": has_attachment,
+        "total_score": score,
+    }
+
+    return _HeuristicResult(
+        total_score=score,
+        newsletter_signal=list_unsub_present,
+        summary=summary,
+    )
+
+
+def _parse_iso(value: str | None) -> datetime:
+    """Parse an ISO 8601 string to a timezone-aware datetime.
+
+    Falls back to now(UTC) if the value is absent or unparseable.
+    Python 3.11+ natively parses the ``Z`` suffix so we do not replace it.
+    """
+    if not value:
+        return datetime.now(UTC)
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+    except (ValueError, AttributeError):
+        return datetime.now(UTC)
+
+
+def _terminate(
+    ctx: NodeContext,
+    email: dict[str, Any],
+    *,
+    bucket: str,
+    signal: str,
+    score: float | None,
+    reason: str,
+) -> MailAgentState:
+    """Apply adapter side-effects + persist spam decision + emit mission (phishing only).
+
+    Per spec §5.3:
+    - spam/phishing-alert: label __spam__ + set_keyword $junk=True
+    - newsletter: label newsletter + set_keyword nonjunk=True
+    - phishing-alert only: emit mission via mission_emitter
+
+    Returns the state dict triggering pipeline routing (END for spam/phishing-alert,
+    continue for newsletter).
+    """
+    email_id: str = email["id"]
+
+    if bucket in {"spam", "phishing-alert"}:
+        ctx.mail.label(email_id, "__spam__")
+        ctx.mail.set_keyword(email_id, "$junk", True)
+        actions_applied = ["label:__spam__", "keyword:$junk"]
+    else:  # newsletter
+        ctx.mail.label(email_id, "newsletter")
+        ctx.mail.set_keyword(email_id, "nonjunk", True)
+        actions_applied = ["label:newsletter", "keyword:nonjunk"]
+
+    decision_id: UUID = spam_decisions.insert(
+        email_id=email_id,
+        thread_id=email.get("threadId"),
+        sender_email=_sender_email(email),
+        subject=email.get("subject", ""),
+        received_at=_parse_iso(email.get("receivedAt")),
+        bucket=bucket,
+        signal_source=signal,
+        score=score,
+        reason=reason,
+    )
+
+    if bucket == "phishing-alert":
+        preview = (email.get("preview") or "")[:500]
+        ctx.base.mission_emitter.emit(
+            intent_text=f"Phishing suspected: {email.get('subject', '(no subject)')}",
+            reason="phishing-alert bucket auto-archived by spam_triage",
+            artifact={
+                "kind": "phishing_alert",
+                "evidence": {
+                    "email_id": email_id,
+                    "sender": _sender_email(email),
+                    "reason": reason,
+                    "score": score,
+                    "spam_decision_id": str(decision_id),
+                },
+                "hints": {"body_preview": preview},
+            },
+        )
+
+    return {
+        "spam_bucket": bucket,
+        "spam_decision_id": decision_id,
+        "actions_applied": actions_applied,
+    }
+
+
+def make_spam_triage(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentState]:
+    """Factory for the spam_triage node.
+
+    Implements a 5-stage first-match-wins cascade to classify incoming mail
+    into one of three buckets (spam, phishing-alert, newsletter) or pass it
+    through (bucket=None).
+
+    Stage 1 — Trust upstream rspamd via JMAP keywords ($junk / nonjunk).
+    Stage 2 — Trust upstream rspamd via org.apache.james.rspamd.status header.
+    Stage 3 — Header heuristics (list-unsubscribe, DKIM, return-path mismatch).
+    Stage 4 — LLM grey-zone check (only if grey_zone=True from stages 2–3).
+    Stage 5 — Default pass-through.
+
+    Gate check (spec §5.5): if spam_filter_enabled=False in config_values,
+    returns {"spam_bucket": None} immediately — zero cost.
+
+    Parameters
+    ----------
+    ctx
+        Execution context with mail adapter, base context, and owner_email.
+
+    Returns
+    -------
+    Callable
+        A node function ``(MailAgentState) -> MailAgentState``.
+    """
+
+    def _node(state: MailAgentState) -> MailAgentState:
+        cfg = ctx.base.sentinel_row.config_values
+
+        # Gate check — FIRST, before any work (spec §5.5)
+        if not cfg.get("spam_filter_enabled", False):
+            return {"spam_bucket": None}
+
+        thread: list[dict[str, Any]] = state.get("thread") or []
+        if not thread:
+            return {"spam_bucket": None}
+
+        latest = thread[-1]
+
+        # ----------------------------------------------------------------
+        # Stage 1 — Trust upstream rspamd via JMAP keywords
+        # ----------------------------------------------------------------
+        kw: dict[str, Any] = latest.get("keywords") or {}
+        if kw.get("$junk"):
+            return _terminate(
+                ctx,
+                latest,
+                bucket="spam",
+                signal="rspamd_junk_keyword",
+                score=None,
+                reason="upstream rspamd marked $junk",
+            )
+        if kw.get("nonjunk"):
+            # rspamd said HAM — defer to it, no further checks, no DB row
+            return {"spam_bucket": None}
+
+        # ----------------------------------------------------------------
+        # Stage 2 — Trust upstream rspamd via org.apache.james.rspamd.status header
+        # ----------------------------------------------------------------
+        rspamd_action = _parse_rspamd_status(latest.get("headers") or [])
+        if rspamd_action in {"reject", "soft reject"}:
+            return _terminate(
+                ctx,
+                latest,
+                bucket="spam",
+                signal="rspamd_status_reject",
+                score=None,
+                reason=f"rspamd action={rspamd_action}",
+            )
+        if rspamd_action == "rewrite subject":
+            return _terminate(
+                ctx,
+                latest,
+                bucket="spam",
+                signal="rspamd_status_rewrite",
+                score=None,
+                reason="rspamd action=rewrite subject",
+            )
+        grey_zone = rspamd_action in {"add header", "greylist"}
+
+        # ----------------------------------------------------------------
+        # Stage 3 — Header heuristics
+        # ----------------------------------------------------------------
+        h = _header_heuristic_score(latest)
+        if h.newsletter_signal and h.total_score < _HEURISTIC_NEWSLETTER_MAX_SCORE:
+            return _terminate(
+                ctx,
+                latest,
+                bucket="newsletter",
+                signal="heuristic_newsletter",
+                score=None,
+                reason=f"list-unsubscribe present, heuristic score={h.total_score}",
+            )
+        if h.total_score >= _HEURISTIC_GREY_MIN_SCORE:
+            grey_zone = True
+
+        # ----------------------------------------------------------------
+        # Stage 4 — LLM grey-zone check (only if grey_zone=True)
+        # ----------------------------------------------------------------
+        if not grey_zone:
+            return {"spam_bucket": None}
+
+        # Build a compact headers summary string for the prompt
+        headers_summary_lines = [f"{k}: {v}" for k, v in h.summary.items()]
+        headers_summary = "\n".join(headers_summary_lines)
+
+        prompt = spam_check_prompt(
+            dict(state),
+            headers_summary=headers_summary,
+            rspamd_action=rspamd_action,
+            owner_email=ctx.owner_email,
+        )
+        out: SpamCheckOutput = structured_call(
+            prompt,
+            SpamCheckOutput,
+            hardening=Hardening.COMPACT,
+            use_case=UseCase.SPAM_CHECK,
+        )
+
+        spam_thresh = float(cfg.get("spam_llm_confidence_threshold", 0.85))
+        news_thresh = float(cfg.get("spam_llm_newsletter_threshold", 0.70))
+
+        if out.bucket in {"spam", "phishing-alert"} and out.confidence >= spam_thresh:
+            return _terminate(
+                ctx,
+                latest,
+                bucket=out.bucket,
+                signal="llm_grey_zone",
+                score=out.confidence,
+                reason=out.reason,
+            )
+        if out.bucket == "newsletter" and out.confidence >= news_thresh:
+            return _terminate(
+                ctx,
+                latest,
+                bucket="newsletter",
+                signal="llm_grey_zone",
+                score=out.confidence,
+                reason=out.reason,
+            )
+
+        # Stage 5 — default pass-through
+        return {"spam_bucket": None}
+
+    return _node
+
+
 __all__ = [
     "NodeContext",
     "make_apply_actions",
@@ -785,5 +1116,6 @@ __all__ = [
     "make_load_thread",
     "make_match_rules",
     "make_select_memories",
+    "make_spam_triage",
     "make_thread_status",
 ]
