@@ -562,6 +562,172 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /sentinels:
+    get:
+      tags:
+      - sentinels
+      summary: List Sentinels
+      description: Return all sentinels with 24-hour run statistics.
+      operationId: list_sentinels_sentinels_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/SentinelSummary'
+                type: array
+                title: Response List Sentinels Sentinels Get
+  /sentinels/runs/{run_id}:
+    get:
+      tags:
+      - sentinels
+      summary: Get Run Detail
+      description: Return the full detail for a single sentinel run.
+      operationId: get_run_detail_sentinels_runs__run_id__get
+      parameters:
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Run Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SentinelRunDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sentinels/{name}:
+    get:
+      tags:
+      - sentinels
+      summary: Get Sentinel
+      description: Return the full detail for a single sentinel.
+      operationId: get_sentinel_sentinels__name__get
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SentinelDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - sentinels
+      summary: Patch Sentinel
+      description: 'Toggle enabled state or update config_values for a sentinel.
+
+
+        If ``config_values`` is provided, it is validated against the sentinel''s
+
+        ``config_schema`` using JSON Schema Draft 2020-12 before persisting.
+
+        Returns 422 with code ``validation_failed`` on schema violations.'
+      operationId: patch_sentinel_sentinels__name__patch
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SentinelPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SentinelDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /sentinels/{name}/runs:
+    get:
+      tags:
+      - sentinels
+      summary: List Runs
+      description: 'List sentinel runs, newest first.
+
+
+        Accepts optional pagination parameters:
+
+        - ``limit``: 1..500 (default 100)
+
+        - ``before``: ISO-8601 timestamp cursor'
+      operationId: list_runs_sentinels__name__runs_get
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 100
+          title: Limit
+      - name: before
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Before
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SentinelRunSummary'
+                title: Response List Runs Sentinels  Name  Runs Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     Agent:
@@ -836,6 +1002,223 @@ components:
       required:
       - user_response
       title: ResumeBody
+    SentinelDetail:
+      properties:
+        name:
+          type: string
+          title: Name
+        display_name:
+          type: string
+          title: Display Name
+        description:
+          type: string
+          title: Description
+        enabled:
+          type: boolean
+          title: Enabled
+        version:
+          type: string
+          title: Version
+        config_schema:
+          additionalProperties: true
+          type: object
+          title: Config Schema
+        config_values:
+          additionalProperties: true
+          type: object
+          title: Config Values
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - name
+      - display_name
+      - description
+      - enabled
+      - version
+      - config_schema
+      - config_values
+      - created_at
+      - updated_at
+      title: SentinelDetail
+      description: Full sentinel row including config schema and values.
+    SentinelPatch:
+      properties:
+        enabled:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Enabled
+        config_values:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Config Values
+      additionalProperties: false
+      type: object
+      title: SentinelPatch
+      description: Partial update payload. Extra keys are rejected.
+    SentinelRunDetail:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        sentinel_name:
+          type: string
+          title: Sentinel Name
+        event_ref:
+          type: string
+          title: Event Ref
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        duration_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Ms
+        outcome:
+          type: string
+          enum:
+          - ignored
+          - processed
+          - mission_created
+          - delegated
+          - error
+          title: Outcome
+        mission_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Mission Id
+        llm_calls:
+          type: integer
+          title: Llm Calls
+        trace:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Trace
+        error_repr:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Repr
+      type: object
+      required:
+      - id
+      - sentinel_name
+      - event_ref
+      - started_at
+      - completed_at
+      - duration_ms
+      - outcome
+      - mission_id
+      - llm_calls
+      - trace
+      - error_repr
+      title: SentinelRunDetail
+      description: Full run record including trace and error information.
+    SentinelRunSummary:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        sentinel_name:
+          type: string
+          title: Sentinel Name
+        event_ref:
+          type: string
+          title: Event Ref
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        duration_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Ms
+        outcome:
+          type: string
+          enum:
+          - ignored
+          - processed
+          - mission_created
+          - delegated
+          - error
+          title: Outcome
+        mission_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Mission Id
+        llm_calls:
+          type: integer
+          title: Llm Calls
+      type: object
+      required:
+      - id
+      - sentinel_name
+      - event_ref
+      - started_at
+      - completed_at
+      - duration_ms
+      - outcome
+      - mission_id
+      - llm_calls
+      title: SentinelRunSummary
+      description: One row from ``sentinel_run``, without the heavy fields.
+    SentinelSummary:
+      properties:
+        name:
+          type: string
+          title: Name
+        display_name:
+          type: string
+          title: Display Name
+        enabled:
+          type: boolean
+          title: Enabled
+        version:
+          type: string
+          title: Version
+        stats_24h:
+          $ref: '#/components/schemas/Stats24h'
+      type: object
+      required:
+      - name
+      - display_name
+      - enabled
+      - version
+      - stats_24h
+      title: SentinelSummary
+      description: Shallow representation used in the list endpoint.
     Skill:
       properties:
         id:
@@ -1076,6 +1459,20 @@ components:
       title: SkillUpdate
       description: Partial update. All fields optional; empty body → 422 (enforced
         in router).
+    Stats24h:
+      properties:
+        total:
+          type: integer
+          title: Total
+        errors:
+          type: integer
+          title: Errors
+      type: object
+      required:
+      - total
+      - errors
+      title: Stats24h
+      description: 24-hour run statistics for a sentinel.
     ValidationError:
       properties:
         loc:
