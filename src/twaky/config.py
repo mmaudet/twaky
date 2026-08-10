@@ -81,6 +81,17 @@ class Settings(BaseSettings):
         alias="twaky_atlas_max_tokens",
     )
 
+    # --- Sentinels framework ---
+    sentinel_timeout_s: int = Field(default=60)
+    sentinel_max_concurrent_events: int = Field(default=4)
+    sentinel_run_retention_days: int = Field(default=30)
+
+    # --- JMAP polling event source ---
+    jmap_session_url: str = Field(default="")
+    jmap_bearer_token: str = Field(default="")
+    jmap_account_email: str = Field(default="")
+    jmap_poll_interval_s: int = Field(default=60)
+
     # --- External services ---
     jmap_endpoint: str = Field(default="http://tmail-backend:8080/jmap")
     # TBD spec §13: fetch accountId dynamically via JMAP session call once the
