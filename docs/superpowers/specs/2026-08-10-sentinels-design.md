@@ -214,7 +214,10 @@ class Sentinel(ABC):
     """
     name: ClassVar[str]               # e.g. "mail" — matches DB row name
     version: ClassVar[str]            # e.g. "1.0.0" — code version
-    exchanges: ClassVar[list[str]]    # RabbitMQ exchange:routing_key patterns
+    event_source_kind: ClassVar[Literal["rabbitmq", "jmap_poll"]]
+                                      # which EventSource strategy this sentinel
+                                      # expects (see §4.5). Per-instance overrides
+                                      # via sentinel.config_values.event_source.
 
     @abstractmethod
     def process(self, event: Event, ctx: Context) -> Outcome:
@@ -244,7 +247,10 @@ class Outcome(str, Enum):
 `sentinel_row` (DB config values), and a logger bound to the sentinel
 name. Injected by the runtime; sentinels never construct one themselves.
 
-`Event`: `{exchange: str, routing_key: str, message_id: str, payload: dict}`.
+`Event`: `{source_kind: Literal["rabbitmq","jmap_poll"], source_ref: str,
+message_id: str, payload: dict}`. Both event sources normalize into this
+shape (`source_ref` is the exchange:routing_key for RabbitMQ, the JMAP
+accountId for jmap_poll). See §4.5.
 
 ## 4.2 The runtime event loop
 
@@ -611,9 +617,10 @@ DB, not in the graph).
 Guaranteed by the `match_rules` node body:
 
 1. **Thread continuity** (cost 0): a rule already applied to this thread
-   is re-applied — even if `run_on_threads=false` (per twake-agent's
-   ordering that this MUST come before learned patterns to avoid a
-   pattern short-circuiting the thread guard).
+   is re-applied — **only when the rule has `run_on_threads=true`** (rules
+   with `run_on_threads=false` are deliberately excluded from continuity;
+   they run per-message). This MUST come before learned patterns so a
+   pattern cannot short-circuit the thread guard.
 2. **Learned patterns** (cost 0): `mail_sentinel_learned_pattern` for
    this sender.
 3. **Static conditions** (cost 0): regex / glob / header match on each
@@ -1098,11 +1105,16 @@ MAIL_SENTINEL_EVENT_SOURCE=jmap_poll
 # with an OIDC Bearer token issued by sso.linagora.com (client_id=tmail,
 # aud=tmail, scope=openid profile email). The dev James (if you deploy
 # one) will have a different endpoint.
-MAIL_SENTINEL_JMAP_ENDPOINT=https://jmap-new.linagora.com
-MAIL_SENTINEL_JMAP_BEARER_TOKEN=  # see README §5 "Obtaining a JMAP token"
-MAIL_SENTINEL_JMAP_POLL_INTERVAL_S=60
-MAIL_SENTINEL_JMAP_MAILBOX_ROLE=inbox
+JMAP_SESSION_URL=https://jmap-new.linagora.com/jmap/session
+JMAP_BEARER_TOKEN=            # see §11.5 for capture procedure
+JMAP_ACCOUNT_EMAIL=you@linagora.com
+JMAP_POLL_INTERVAL_S=60
 ```
+
+**Naming note**: `JMAP_SESSION_URL` (session discovery endpoint, must end
+in `/jmap/session`) NOT `MAIL_SENTINEL_JMAP_ENDPOINT` — earlier spec drafts
+used the origin-only form; the shipped code (T6b) reads the full URL from
+`settings.jmap_session_url` and derives `apiUrl` from the session response.
 
 ## 11.5 Obtaining a JMAP Bearer token (MVP procedure)
 

@@ -23,9 +23,6 @@ import pytest
 from twaky.config import settings
 from twaky.sentinels.sources.rabbitmq import RabbitMQEventSource
 
-pytestmark = pytest.mark.integration
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

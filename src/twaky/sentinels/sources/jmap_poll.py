@@ -272,7 +272,16 @@ class JmapPollingEventSource(EventSource):
         resp = await client.post(api_url, json=body)
         resp.raise_for_status()
         data = resp.json()
-        return data["methodResponses"][0][1]["list"]  # type: ignore[no-any-return]
+        result = data["methodResponses"][0][1]
+        not_found: list[str] = result.get("notFound") or []
+        if not_found:
+            log.warning(
+                "jmap_poll[%s]: Email/get: %d ids not found: %s",
+                self._sentinel_name,
+                len(not_found),
+                not_found[:5],
+            )
+        return result["list"]  # type: ignore[no-any-return]
 
     def _load_state(self) -> str | None:
         """Read ``jmap_last_state`` from the sentinel's DB config_values."""
