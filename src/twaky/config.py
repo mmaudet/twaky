@@ -81,6 +81,17 @@ class Settings(BaseSettings):
         alias="twaky_atlas_max_tokens",
     )
 
+    # --- Sentinels framework ---
+    sentinel_timeout_s: int = Field(default=60)
+    sentinel_max_concurrent_events: int = Field(default=4)
+    sentinel_run_retention_days: int = Field(default=30)
+
+    # --- JMAP polling event source ---
+    jmap_session_url: str = Field(default="")
+    jmap_bearer_token: str = Field(default="")
+    jmap_account_email: str = Field(default="")
+    jmap_poll_interval_s: int = Field(default=60)
+
     # --- External services ---
     jmap_endpoint: str = Field(default="http://tmail-backend:8080/jmap")
     # TBD spec §13: fetch accountId dynamically via JMAP session call once the
@@ -92,6 +103,12 @@ class Settings(BaseSettings):
     plume_oidc_client_id: str = Field(default="")
     plume_oidc_client_secret: str = Field(default="")
     plume_oidc_issuer: str = Field(default="")
+
+    # --- Mail sentinel LLM tiers ---
+    mail_sentinel_economy_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
+    mail_sentinel_default_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
+    mail_sentinel_chat_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
+    mail_sentinel_draft_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
 
     # --- Sub-project 3a: API ---
     api_base_url: str = Field(default="http://twaky-api:8000")

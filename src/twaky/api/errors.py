@@ -29,13 +29,31 @@ async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONR
     )
 
 
+def _safe_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
+    """Return pydantic v2 error dicts with non-serializable ctx.error coerced to str."""
+    safe: list[dict[str, Any]] = []
+    for err in exc.errors():
+        entry: dict[str, Any] = dict(err)
+        # pydantic v2 ctx.error is a Python exception — not JSON-serializable
+        if "ctx" in entry and "error" in entry["ctx"]:
+            entry["ctx"] = dict(entry["ctx"])
+            entry["ctx"]["error"] = str(entry["ctx"]["error"])
+        # loc is a tuple; convert to list for JSON serialization
+        if "loc" in entry:
+            entry["loc"] = list(entry["loc"])
+        # drop url key (not needed in API responses)
+        entry.pop("url", None)
+        safe.append(entry)
+    return safe
+
+
 async def _validation_error_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     return error_response(
         code="validation_error",
         message="request body failed validation",
-        detail={"errors": exc.errors()},
+        detail={"errors": _safe_errors(exc)},
         status_code=422,
     )
 

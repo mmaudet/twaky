@@ -37,6 +37,15 @@ class TestLegalTransitions:
     def test_planning_to_failed_allowed(self):
         check_transition(S.PLANNING, S.FAILED)  # recovery path
 
+    def test_declared_to_awaiting_user_allowed(self):
+        # Sentinel-emitted missions skip Atlas planning and go straight to
+        # owner attention.  guards.py must allow DECLARED → AWAITING_USER.
+        check_transition(S.DECLARED, S.AWAITING_USER)
+        # Verify that the other DECLARED edges are still intact.
+        check_transition(S.DECLARED, S.PLANNING)
+        check_transition(S.DECLARED, S.CANCELLED)
+        check_transition(S.DECLARED, S.FAILED)
+
 
 class TestIllegalTransitions:
     def test_declared_to_running_forbidden(self):

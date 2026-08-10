@@ -336,6 +336,87 @@ Then browse to `https://twaky.${BASE_DOMAIN}/skills`.
 Click Delete on the list page. Confirmation dialog warns that in-flight
 missions using the skill will fail on the next call.
 
+## Sentinels
+
+Sentinels are background autonomous agents. Each sentinel monitors one
+event source (JMAP, RabbitMQ) and evaluates a configurable condition on
+every event; when the condition fires it dispatches an Atlas mission.
+Sentinels are stored in Postgres (`sentinel` table) and hot-reloaded at
+runtime via `LISTEN/NOTIFY`.
+
+### First-time setup on an existing volume
+
+The migration (`sql/008_init_sentinels.sh`) only runs on fresh volumes.
+For an existing `twaky-pg`:
+
+```bash
+docker exec -i twaky-pg bash /docker-entrypoint-initdb.d/008_init_sentinels.sh
+```
+
+Then restart `twaky-sentinel` to pick up the new tables.
+
+### JMAP token capture
+
+Plume (the JMAP agent) obtains an access token via OIDC token exchange.
+See **spec §11.5** for the full capture procedure; in short you need
+`JMAP_BEARER_TOKEN` in `.env` pointing to a long-lived JMAP bearer
+token for the owner's account, and `JMAP_SESSION_URL` pointing to the
+JMAP session endpoint (e.g. `https://jmap.${BASE_DOMAIN}/jmap/session`).
+
+### Enabling / disabling a sentinel
+
+Sentinels ship disabled by default. Toggle one via the API (endpoint
+lands in T25):
+
+```bash
+# Enable
+curl -X PATCH https://twaky.${BASE_DOMAIN}/sentinels/<name> \
+     -H "Cookie: twaky_session=$COOKIE" \
+     -H "Content-Type: application/json" \
+     -d '{"enabled": true}'
+
+# Disable
+curl -X PATCH https://twaky.${BASE_DOMAIN}/sentinels/<name> \
+     -H "Cookie: twaky_session=$COOKIE" \
+     -H "Content-Type: application/json" \
+     -d '{"enabled": false}'
+```
+
+The `twaky-sentinel` container picks up the change via `LISTEN/NOTIFY`
+without a restart.
+
+### Runtime tuning
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `SENTINEL_TIMEOUT_S` | 60 | Per-event processing timeout |
+| `SENTINEL_MAX_CONCURRENT_EVENTS` | 4 | Bounded concurrency |
+| `SENTINEL_RUN_RETENTION_DAYS` | 30 | Prune old sentinel_run rows |
+
+### Evals
+
+Three YAML fixtures under `tests/evals/mail/` cover the mail pipeline
+end-to-end using a deterministic fake LLM (no network calls):
+
+| Fixture | Email type | Expected outcome |
+|---|---|---|
+| `spam_archive.yaml` | Newsletter-style email | `archive` action applied |
+| `invoice_label.yaml` | Invoice notification | `label:invoice` action applied |
+| `meeting_request_draft.yaml` | Meeting request | Draft reply saved |
+
+**Run offline (CI default):**
+
+```bash
+TWAKY_PG_HOST=172.27.0.33 uv run pytest tests/evals -v
+```
+
+**Run against a real LLM** (opt-in, deferred to SP6b when `EVAL_LIVE=1`
+support lands):
+
+```bash
+EVAL_LIVE=1 TWAKY_PG_HOST=172.27.0.33 uv run pytest tests/evals -v
+```
+
 ## Quickstart
 
 ```bash

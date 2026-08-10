@@ -129,6 +129,83 @@ def _transition(
     _notify_state_change(mission_id, to_state)
 
 
+def park_for_review(
+    intent_text: str,
+    owner_email: str,
+    declared_by: str,
+    reason: str,
+    artifact: dict[str, Any],
+) -> Mission:
+    """Declare a mission and immediately park it in AWAITING_USER.
+
+    Use this for callers that need owner attention WITHOUT an Atlas planning
+    phase — sentinels, external triggers, etc.
+
+    Performs the INSERT and the DECLARED → AWAITING_USER transition in a
+    **single transaction** so the atlas daemon never sees a bare
+    ``mission_declared`` row and races to move it to PLANNING.  The
+    ``mission_declared`` NOTIFY is intentionally suppressed for the same
+    reason; a ``mission_changed`` NOTIFY for ``awaiting_user`` is emitted
+    once the transaction commits.
+
+    Returns the mission as it stands after the transition (state=AWAITING_USER).
+    """
+    mid = uuid4()
+    with _trace("park_for_review", mid, extra={"reason": reason}):
+        now = datetime.now(UTC)
+        m = Mission(
+            id=mid,
+            owner_email=owner_email,
+            declared_by=declared_by,
+            declared_at=now,
+            intent_text=intent_text,
+            state=MissionState.DECLARED,
+            due_at=None,
+            artifacts=[],
+            langfuse_session_id=f"mission-{uuid4()}",
+            created_at=now,
+            updated_at=now,
+        )
+        artifacts = json.dumps([artifact])
+        with get_pool().connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO mission (
+                    id, owner_email, declared_by, declared_at, intent_text,
+                    plan, state, state_reason, due_at, artifacts,
+                    langfuse_session_id, created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, NULL, %s, NULL, NULL, '[]'::jsonb, %s, %s, %s)
+                """,
+                (
+                    m.id,
+                    m.owner_email,
+                    m.declared_by,
+                    m.declared_at,
+                    m.intent_text,
+                    MissionState.DECLARED.value,
+                    m.langfuse_session_id,
+                    m.created_at,
+                    m.updated_at,
+                ),
+            )
+            cur.execute(
+                "UPDATE mission SET state = %s, state_reason = %s, "
+                "artifacts = %s::jsonb, updated_at = %s WHERE id = %s",
+                (
+                    MissionState.AWAITING_USER.value,
+                    reason,
+                    artifacts,
+                    datetime.now(UTC),
+                    m.id,
+                ),
+            )
+            conn.commit()
+    _notify_state_change(m.id, MissionState.AWAITING_USER)
+    _flush()
+    return repository.get(m.id)  # type: ignore[return-value]
+
+
 def start_planning(mission_id: UUID) -> None:
     with _trace("start_planning", mission_id):
         _transition(mission_id, MissionState.PLANNING)
@@ -248,6 +325,7 @@ __all__ = [
     "commit_plan",
     "declare",
     "finish",
+    "park_for_review",
     "request_user_input",
     "resume",
     "start_planning",
