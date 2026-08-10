@@ -416,7 +416,15 @@ async def _housekeeping(settings: Settings, stop_event: asyncio.Event) -> None:
         except Exception:
             log.exception("housekeeping: purge_old_runs failed")
 
-        # TODO(T15): call mail.store.memories.purge_expired()
+        try:
+            from twaky.sentinels.mail.store import memories as mail_memories
+
+            expired = await asyncio.to_thread(mail_memories.purge_expired)
+            log.info(
+                "housekeeping: purged %d expired mail_sentinel_memory rows", expired
+            )
+        except Exception:
+            log.exception("housekeeping: purge_expired failed")
 
 
 __all__ = [
