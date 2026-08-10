@@ -127,3 +127,62 @@ def test_fallback_on_primary_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert isinstance(result, _S)
     assert result.v == "fallback"
+
+
+# ---------------------------------------------------------------------------
+# Local endpoint override
+# ---------------------------------------------------------------------------
+
+
+def test_local_endpoint_kwargs_passed_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """api_base and api_key are forwarded to ChatLiteLLM when settings are non-empty."""
+    from twaky.sentinels.mail.llm import invoke as invoke_mod
+
+    monkeypatch.setattr(settings, "mail_sentinel_api_base", "http://x")
+    monkeypatch.setattr(settings, "mail_sentinel_api_key", "k")
+
+    expected = _S(v="local")
+    mock_chain = MagicMock()
+    mock_chain.invoke.return_value = expected
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_chain
+    MockChatLiteLLM = MagicMock(return_value=mock_llm)
+    monkeypatch.setattr(invoke_mod, "ChatLiteLLM", MockChatLiteLLM)
+
+    invoke_mod.structured_call(
+        "hello",
+        _S,
+        hardening=Hardening.NONE,
+        use_case=UseCase.THREAD_STATUS,
+    )
+
+    _call_kwargs = MockChatLiteLLM.call_args.kwargs
+    assert _call_kwargs.get("api_base") == "http://x"
+    assert _call_kwargs.get("api_key") == "k"
+
+
+def test_default_endpoint_when_settings_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No api_base or api_key kwargs are passed when settings are empty strings."""
+    from twaky.sentinels.mail.llm import invoke as invoke_mod
+
+    monkeypatch.setattr(settings, "mail_sentinel_api_base", "")
+    monkeypatch.setattr(settings, "mail_sentinel_api_key", "")
+
+    expected = _S(v="default")
+    mock_chain = MagicMock()
+    mock_chain.invoke.return_value = expected
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_chain
+    MockChatLiteLLM = MagicMock(return_value=mock_llm)
+    monkeypatch.setattr(invoke_mod, "ChatLiteLLM", MockChatLiteLLM)
+
+    invoke_mod.structured_call(
+        "hello",
+        _S,
+        hardening=Hardening.NONE,
+        use_case=UseCase.THREAD_STATUS,
+    )
+
+    _call_kwargs = MockChatLiteLLM.call_args.kwargs
+    assert "api_base" not in _call_kwargs
+    assert "api_key" not in _call_kwargs

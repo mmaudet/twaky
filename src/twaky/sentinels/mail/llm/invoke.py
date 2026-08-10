@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from langchain_litellm import ChatLiteLLM
 
+from twaky.config import settings
 from twaky.sentinels.mail.llm.hardening import Hardening, hardening_prefix
 from twaky.sentinels.mail.llm.tiers import UseCase, models_for, tier_for
 
@@ -44,10 +46,16 @@ def structured_call[T](
 
     full_prompt = hardening_prefix(hardening) + prompt
 
+    llm_kwargs: dict[str, Any] = {}
+    if settings.mail_sentinel_api_base:
+        llm_kwargs["api_base"] = settings.mail_sentinel_api_base
+    if settings.mail_sentinel_api_key:
+        llm_kwargs["api_key"] = settings.mail_sentinel_api_key
+
     last_exc: Exception | None = None
     for model in models:
         try:
-            llm = ChatLiteLLM(model=model)
+            llm = ChatLiteLLM(model=model, **llm_kwargs)
             llm_structured = llm.with_structured_output(schema)
             result = llm_structured.invoke(full_prompt)
             if not isinstance(result, schema):

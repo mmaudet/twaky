@@ -119,10 +119,25 @@ class Settings(BaseSettings):
     plume_oidc_issuer: str = Field(default="")
 
     # --- Mail sentinel LLM tiers ---
-    mail_sentinel_economy_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
-    mail_sentinel_default_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
-    mail_sentinel_chat_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
-    mail_sentinel_draft_llms: str = Field(default="openrouter/moonshotai/kimi-k2")
+    mail_sentinel_economy_llms: str = Field(
+        default="openai/mlx-community/Qwen3-VL-8B-Instruct-4bit"
+    )
+    mail_sentinel_default_llms: str = Field(
+        default="openai/mlx-community/Qwen3-VL-8B-Instruct-4bit"
+    )
+    mail_sentinel_chat_llms: str = Field(
+        default="openai/mlx-community/Qwen3-VL-8B-Instruct-4bit"
+    )
+    mail_sentinel_draft_llms: str = Field(
+        default="openai/mlx-community/Qwen3-VL-8B-Instruct-4bit"
+    )
+
+    # --- Mail sentinel LLM endpoint override ---
+    # When non-empty, routes mail-sentinel LLM calls to an OpenAI-compatible
+    # endpoint (e.g. a local MLX server) instead of the default LiteLLM provider
+    # routing derived from the model prefix.
+    mail_sentinel_api_base: str = Field(default="")
+    mail_sentinel_api_key: str = Field(default="")
 
     # --- Sub-project 3a: API ---
     api_base_url: str = Field(default="http://twaky-api:8000")
