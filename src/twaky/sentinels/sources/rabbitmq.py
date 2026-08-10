@@ -100,9 +100,14 @@ class RabbitMQEventSource(EventSource):
 
             # Race each message-get against stop_event so the generator can
             # exit cleanly without waiting for a message that may never come.
+            # Stop-event race note: an in-flight basic.get that the broker has
+            # already dispatched is held as unacked until the channel closes
+            # (see `finally: conn.close()` below); the broker will redeliver on
+            # the next connection.  The race is therefore benign — no messages
+            # are silently dropped when stop fires mid-get.
             while not stop_event.is_set():
-                get_task = asyncio.ensure_future(queue.get(timeout=None, fail=False))
-                stop_task = asyncio.ensure_future(stop_event.wait())
+                get_task = asyncio.create_task(queue.get(timeout=None, fail=False))
+                stop_task = asyncio.create_task(stop_event.wait())
 
                 done, pending = await asyncio.wait(
                     {get_task, stop_task},

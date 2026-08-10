@@ -82,6 +82,11 @@ class Settings(BaseSettings):
     )
 
     # --- Sentinels framework ---
+    # No explicit alias= here: pydantic-settings matches env vars
+    # case-insensitively against the field name, so SENTINEL_TIMEOUT_S,
+    # sentinel_timeout_s, etc. all resolve correctly.  The atlas_* fields above
+    # carry explicit aliases because their env var names carry the "twaky_"
+    # prefix that differs from the Python field name.
     sentinel_timeout_s: int = Field(default=60)
     sentinel_max_concurrent_events: int = Field(default=4)
     sentinel_run_retention_days: int = Field(default=30)

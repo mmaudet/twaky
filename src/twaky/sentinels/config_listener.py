@@ -44,6 +44,9 @@ async def run_config_listener(
 
     Returns when *stop_event* is set.
     Reconnects with exponential backoff on transient ``OperationalError``.
+
+    Note: cancellation via ``task.cancel()`` is treated as a transient error
+    and triggers reconnect; set ``stop_event`` for a clean shutdown.
     """
     backoff = _BACKOFF_START
 

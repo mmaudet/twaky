@@ -89,7 +89,17 @@ def test_discovery_finds_matching_sub_packages(tmp_path: Path, monkeypatch) -> N
     monkeypatch.syspath_prepend(str(tmp_path))
 
     # Evict twaky modules EXCEPT discovery and base, so they re-import from tmp_path
-    # but discovery and base stay available from the real source
+    # but discovery and base stay available from the real source.
+    #
+    # WHY base is excluded: the fake sentinel.py files in tmp_path import
+    # `Sentinel` from `twaky.sentinels.base`.  If we also evict base, it gets
+    # re-imported from tmp_path as a *different module object* than the one
+    # already held by the test process.  Discovery then sees a `SentinelClass`
+    # whose MRO includes the tmp_path copy of `Sentinel`, which is a distinct
+    # class from the real `Sentinel` imported at the top of this file — making
+    # `issubclass(result["fake_a"], Sentinel)` return False and breaking the
+    # assertions below.  Keeping base in sys.modules ensures both the test and
+    # the discovered classes share the identical `Sentinel` base class object.
     keys_to_delete = [
         k
         for k in sys.modules

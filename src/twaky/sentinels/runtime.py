@@ -407,6 +407,16 @@ async def _housekeeping(settings: Settings, stop_event: asyncio.Event) -> None:
 
     Exits when ``stop_event`` is set.
     """
+    # Style note — two timeout patterns are used intentionally in this file:
+    # * asyncio.wait_for(stop_event.wait(), timeout=N) — used for interruptible
+    #   sleeps where normal completion (timeout elapsed) is the common path.
+    #   wait_for returns None on coroutine completion and raises TimeoutError
+    #   when the timeout fires; the inverted semantics (timeout = "do work") map
+    #   more clearly onto a "sleep until stop or N seconds" pattern.
+    # * asyncio.timeout(N) context manager — used around process() calls where
+    #   we want a hard deadline and the timeout path is the exceptional case.
+    # Both are correct; mixing them avoids wrapping the common-path branch in an
+    # extra try/except just to silence the expected TimeoutError.
     while not stop_event.is_set():
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=3600.0)

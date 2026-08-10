@@ -121,13 +121,8 @@ def test_delegate_times_out_without_cancelling():
     # Mission must still exist in DB — not auto-cancelled by delegate().
     mission = repository.get(result.mission_id)
     assert mission is not None, "delegate() must not delete the mission on timeout"
-    # Atlas daemon may have already advanced it to PLANNING, but it must NOT be
-    # in a terminal state that was triggered by delegate() itself.
-    assert not mission.state.is_terminal or mission.state == MissionState.CANCELLED, (
-        f"Expected live state (declared/planning/running/awaiting_user) but got {mission.state}; "
-        "delegate() must not auto-cancel on timeout"
-    )
-    # Relax the assertion slightly: accept DECLARED or PLANNING as "still live".
+    # Accept DECLARED or PLANNING as "still live" — atlas daemon may have
+    # already advanced the state, but delegate() must NOT auto-cancel on timeout.
     assert mission.state in {
         MissionState.DECLARED,
         MissionState.PLANNING,

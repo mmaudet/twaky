@@ -151,6 +151,11 @@ def update_config_value(name: str, key: str, value: Any) -> SentinelConfig:
     SentinelNotFound
         If no row with the given *name* exists.
     """
+    # Defense-in-depth: key comes from callers (e.g. JMAP adapter) and is
+    # embedded in the jsonb_set path literal.  Reject anything that isn't a
+    # plain identifier to prevent accidental injection via malformed config.
+    if not key.isidentifier():
+        raise ValueError(f"config_values key must be a valid identifier: {key!r}")
     # jsonb_set path must be a text[] literal e.g. '{jmap_last_state}'
     path = "{" + key + "}"
     sql = (
@@ -215,7 +220,8 @@ def insert_run(row: dict[str, Any]) -> SentinelRun:
         cur.execute(sql, params)
         inserted = cur.fetchone()
 
-    assert inserted is not None  # RETURNING * always yields a row on INSERT
+    if inserted is None:
+        raise RuntimeError("INSERT INTO sentinel_run ... RETURNING * yielded no row")  # pragma: no cover
     return _row_to_run(inserted)
 
 

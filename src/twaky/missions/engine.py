@@ -151,6 +151,9 @@ def park_for_review(
     Returns the mission as it stands after the transition (state=AWAITING_USER).
     """
     mid = uuid4()
+    # Use mid as the stable session id so the Langfuse span opened by
+    # _trace("park_for_review", mid) correlates to the persisted row's
+    # langfuse_session_id without a second random uuid4() diverging the two.
     with _trace("park_for_review", mid, extra={"reason": reason}):
         now = datetime.now(UTC)
         m = Mission(
@@ -162,7 +165,7 @@ def park_for_review(
             state=MissionState.DECLARED,
             due_at=None,
             artifacts=[],
-            langfuse_session_id=f"mission-{uuid4()}",
+            langfuse_session_id=f"mission-{mid}",
             created_at=now,
             updated_at=now,
         )
