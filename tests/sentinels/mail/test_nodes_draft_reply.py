@@ -11,7 +11,11 @@ from unittest.mock import MagicMock, patch
 from uuid import UUID
 
 from twaky.sentinels.mail.adapter import InMemoryMailAdapter
-from twaky.sentinels.mail.nodes import NodeContext, make_draft_reply
+from twaky.sentinels.mail.nodes import (
+    NodeContext,
+    _build_reply_quote,
+    make_draft_reply,
+)
 from twaky.sentinels.mail.schemas import DraftReplyOutput
 from twaky.sentinels.mail.state import MailAgentState
 
@@ -96,9 +100,7 @@ class TestDraftReply:
         assert len(adapter._drafts) == 1
         saved_draft = adapter._drafts[0]
         assert saved_draft["in_reply_to"] == "e1"
-        assert saved_draft["body"].startswith(
-            "Bonjour Alice, merci pour ton message."
-        )
+        assert saved_draft["body"].startswith("Bonjour Alice, merci pour ton message.")
         assert "a écrit :" in saved_draft["body"]  # attribution line (fr)
         assert saved_draft["language"] == "fr"
 
@@ -336,3 +338,144 @@ class TestDraftReply:
         assert len(call_args[0]) >= 2  # prompt and output_schema
         assert call_args[1]["hardening"].name == "FULL"
         assert call_args[1]["use_case"].name == "DRAFT_REPLY"
+
+
+# ---------------------------------------------------------------------------
+# _build_reply_quote helper — attribution line + '> '-prefixed body
+# ---------------------------------------------------------------------------
+
+
+class TestBuildReplyQuote:
+    """Unit tests for the _build_reply_quote helper used by make_draft_reply."""
+
+    def _email(
+        self,
+        *,
+        sender_name: str = "Alice",
+        sender_email: str = "alice@x",
+        received: str = "2026-01-15T10:00:00Z",
+        body: str | None = None,
+        preview: str = "",
+    ) -> dict[str, Any]:
+        e: dict[str, Any] = {
+            "id": "e1",
+            "from": [{"name": sender_name, "email": sender_email}],
+            "receivedAt": received,
+            "preview": preview,
+        }
+        if body is not None:
+            e["textBody"] = [{"partId": "1", "type": "text/plain"}]
+            e["bodyValues"] = {"1": {"value": body}}
+        return e
+
+    def test_fr_attribution_and_prefix(self) -> None:
+        """French: 'Le YYYY-MM-DD, <sender> a écrit :' + '> ' prefix per line."""
+        e = self._email(body="Bonjour Michel.\n\nSecond paragraph.")
+        quote = _build_reply_quote(e, "fr")
+        assert quote.startswith("Le 2026-01-15, Alice a écrit :\n")
+        assert "\n> Bonjour Michel." in quote
+        assert "\n>\n" in quote or "\n> \n" in quote or "\n> Second" in quote
+
+    def test_en_attribution_and_prefix(self) -> None:
+        """English: 'On YYYY-MM-DD, <sender> wrote:' + '> ' prefix per line."""
+        e = self._email(body="Hi Michel.")
+        quote = _build_reply_quote(e, "en")
+        assert quote.startswith("On 2026-01-15, Alice wrote:\n")
+        assert "> Hi Michel." in quote
+
+    def test_uses_sender_email_when_name_missing(self) -> None:
+        e = self._email(sender_name="", sender_email="alice@example.com", body="hi")
+        quote = _build_reply_quote(e, "en")
+        assert "alice@example.com wrote:" in quote
+
+    def test_falls_back_to_preview_when_no_body(self) -> None:
+        e = self._email(body=None, preview="Preview snippet only.")
+        quote = _build_reply_quote(e, "en")
+        assert "> Preview snippet only." in quote
+
+    def test_attribution_only_when_no_body_no_preview(self) -> None:
+        e = self._email(body=None, preview="")
+        quote = _build_reply_quote(e, "en")
+        # Attribution line only, no '> ' lines
+        assert "wrote:" in quote
+        assert "\n>" not in quote
+
+    def test_defaults_to_english_for_unknown_language(self) -> None:
+        e = self._email(body="hi")
+        quote = _build_reply_quote(e, "de")  # not fr → English fallback
+        assert "wrote:" in quote
+
+
+# ---------------------------------------------------------------------------
+# Signature post-append — the LLM is instructed not to sign; we override
+# ---------------------------------------------------------------------------
+
+
+class TestDraftSignature:
+    """Signature configured via settings.mail_sentinel_signature is appended
+    to the LLM body before save_draft is called.
+
+    The LLM prompt says "Do not add a signature" but small models routinely
+    ignore it. Post-appending here is the authoritative source of truth for
+    the outgoing draft's signature block.
+    """
+
+    def _adapter_and_ctx(self, owner: str = "michel@x") -> tuple:
+        adapter = InMemoryMailAdapter()
+        base_ctx = MagicMock()
+        ctx = NodeContext(base=base_ctx, mail=adapter, owner_email=owner)
+        return adapter, ctx
+
+    def _thread(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "e1",
+                "threadId": "t1",
+                "from": [{"name": "Marion", "email": "marion@x"}],
+                "subject": "Reprise contact",
+                "receivedAt": "2026-01-01T00:00:00Z",
+                "textBody": [{"partId": "1", "type": "text/plain"}],
+                "bodyValues": {"1": {"value": "Original body"}},
+                "messageId": ["<orig@x>"],
+                "headers": [],
+            }
+        ]
+
+    def test_signature_appended_when_configured(self, monkeypatch) -> None:
+        from twaky.sentinels.mail import nodes as nodes_mod
+
+        adapter, ctx = self._adapter_and_ctx()
+        monkeypatch.setattr(
+            nodes_mod.settings, "mail_sentinel_signature", "-- \nJane Doe\nCEO"
+        )
+        with patch(
+            "twaky.sentinels.mail.nodes.structured_call",
+            return_value=DraftReplyOutput(body="Merci Marion.", language="fr"),
+        ):
+            make_draft_reply(ctx)({"thread": self._thread()})
+
+        saved = adapter._drafts[0]["body"]
+        # LLM body first, then blank line, then signature, then quoted original.
+        assert saved.startswith("Merci Marion.")
+        assert "-- \nJane Doe\nCEO" in saved
+        # Signature comes BEFORE the attribution line, not after.
+        sig_idx = saved.index("Jane Doe")
+        attr_idx = saved.index("a écrit :")
+        assert sig_idx < attr_idx
+
+    def test_signature_omitted_when_empty(self, monkeypatch) -> None:
+        from twaky.sentinels.mail import nodes as nodes_mod
+
+        adapter, ctx = self._adapter_and_ctx()
+        monkeypatch.setattr(nodes_mod.settings, "mail_sentinel_signature", "")
+        with patch(
+            "twaky.sentinels.mail.nodes.structured_call",
+            return_value=DraftReplyOutput(body="Body only.", language="fr"),
+        ):
+            make_draft_reply(ctx)({"thread": self._thread()})
+
+        saved = adapter._drafts[0]["body"]
+        # No signature block between body and attribution.
+        assert saved.startswith("Body only.")
+        # Attribution line immediately follows (with the double newline).
+        assert saved.index("a écrit :") - saved.index("Body only.") < 100

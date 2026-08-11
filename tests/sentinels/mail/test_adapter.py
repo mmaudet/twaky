@@ -277,9 +277,7 @@ class TestJmapMailAdapter:
         transport = _MultiResponseTransport([mailbox_response, create_response])
         adapter = _adapter(transport)
 
-        draft_id = adapter.save_draft(
-            in_reply_to="<msg@x>", body="body", language="en"
-        )
+        draft_id = adapter.save_draft(in_reply_to="<msg@x>", body="body", language="en")
 
         assert draft_id == "new-draft-srv-id"
         assert adapter._drafts_mailbox_id == "drafts-uuid-123"
@@ -401,3 +399,201 @@ class TestJmapMailAdapter:
         assert args["update"] == {
             "e1": {"keywords/$junk": True, "keywords/nonjunk": False}
         }
+
+    def test_jmap_set_keywords_bulk_with_mailbox_patches(self) -> None:
+        """set_keywords_bulk supports optional mailbox_patches bundled in the same update.
+
+        Restore semantics require atomicity: clearing spam labels + re-adding
+        to INBOX must happen in ONE Email/set so a partial success cannot
+        leave the mail in an inconsistent state.
+        """
+        transport = _SingleResponseTransport(
+            _jmap_response("Email/set", {"updated": {"e1": None}})
+        )
+        adapter = _adapter(transport)
+        adapter.set_keywords_bulk(
+            "e1",
+            {"$junk": False, "nonjunk": True, "$label-newsletter": False},
+            mailbox_patches={"inbox-uuid": True, "junk-uuid": False},
+        )
+
+        assert transport.last_request is not None
+        body = json.loads(transport.last_request.content)
+        args = body["methodCalls"][0][1]
+        assert args["update"] == {
+            "e1": {
+                "keywords/$junk": False,
+                "keywords/nonjunk": True,
+                "keywords/$label-newsletter": False,
+                "mailboxIds/inbox-uuid": True,
+                "mailboxIds/junk-uuid": False,
+            }
+        }
+
+    def test_get_thread_via_thread_get_not_email_query(self) -> None:
+        """get_thread uses Thread/get (RFC 8621 §5) — Email/query filter:inThread
+        is rejected by James JMAP with 'unsupported filter options'.
+
+        Sequence: Thread/get {ids: [t1]} → emailIds list → Email/get each id.
+        Result is sorted by receivedAt ascending.
+        """
+        thread_resp = _jmap_response(
+            "Thread/get",
+            {"list": [{"id": "t1", "emailIds": ["e2", "e1"]}]},
+        )
+        email_e2 = _jmap_response(
+            "Email/get",
+            {
+                "list": [
+                    {
+                        "id": "e2",
+                        "threadId": "t1",
+                        "subject": "second",
+                        "receivedAt": "2026-01-02T00:00:00Z",
+                    }
+                ]
+            },
+        )
+        email_e1 = _jmap_response(
+            "Email/get",
+            {
+                "list": [
+                    {
+                        "id": "e1",
+                        "threadId": "t1",
+                        "subject": "first",
+                        "receivedAt": "2026-01-01T00:00:00Z",
+                    }
+                ]
+            },
+        )
+        transport = _MultiResponseTransport([thread_resp, email_e2, email_e1])
+        adapter = _adapter(transport)
+
+        thread = adapter.get_thread("t1")
+
+        # Chronological (asc) order enforced by the adapter
+        assert [e["id"] for e in thread] == ["e1", "e2"]
+        # First request was Thread/get, NOT Email/query
+        first_body = json.loads(transport.requests[0].content)
+        assert first_body["methodCalls"][0][0] == "Thread/get"
+        assert first_body["methodCalls"][0][1] == {
+            "accountId": "acct-abc",
+            "ids": ["t1"],
+        }
+
+    def test_get_thread_empty_when_thread_not_found(self) -> None:
+        """Thread/get with unknown id → list empty → empty result, no Email/get calls."""
+        transport = _SingleResponseTransport(
+            _jmap_response("Thread/get", {"list": [], "notFound": ["t-nope"]})
+        )
+        adapter = _adapter(transport)
+        assert adapter.get_thread("t-nope") == []
+
+    def test_save_draft_envelope_complete(self) -> None:
+        """save_draft serialises the full RFC 5322 reply envelope.
+
+        - from/to/cc as EmailAddress dicts
+        - subject verbatim (no placeholder when provided)
+        - header:In-Reply-To:asMessageIds + header:References:asMessageIds
+          (typed setters — the ``headers`` array form is rejected by James)
+        - cc key omitted from the update body when cc_addr is falsy
+          (belt-and-braces: keeps request minimal).
+        """
+        transport = _SingleResponseTransport(
+            _jmap_response(
+                "Email/set",
+                {"created": {"draft1": {"id": "srv-1", "blobId": "b"}}},
+            )
+        )
+        adapter = _adapter(transport)
+        adapter._drafts_mailbox_id = "drafts-uuid"
+        adapter.save_draft(
+            in_reply_to="<msg-parent@example.com>",
+            body="Reply text.",
+            language="fr",
+            from_addr=[{"name": "Alice", "email": "alice@x"}],
+            to_addr=[{"name": "Bob", "email": "bob@y"}],
+            cc_addr=[{"email": "carol@z"}],
+            subject="Re: hello",
+            references=["<msg-root@example.com>", "<msg-parent@example.com>"],
+        )
+
+        body = json.loads(transport.last_request.content)
+        create = body["methodCalls"][0][1]["create"]["draft1"]
+        assert create["from"] == [{"name": "Alice", "email": "alice@x"}]
+        assert create["to"] == [{"name": "Bob", "email": "bob@y"}]
+        assert create["cc"] == [{"email": "carol@z"}]
+        assert create["subject"] == "Re: hello"
+        assert create["header:In-Reply-To:asMessageIds"] == ["<msg-parent@example.com>"]
+        assert create["header:References:asMessageIds"] == [
+            "<msg-root@example.com>",
+            "<msg-parent@example.com>",
+        ]
+        # ``headers`` array form (rejected by James) MUST NOT appear.
+        assert "headers" not in create
+
+    def test_save_draft_omits_cc_when_empty(self) -> None:
+        """When cc_addr is None or empty, no ``cc`` key is present in the create body."""
+        transport = _SingleResponseTransport(
+            _jmap_response("Email/set", {"created": {"draft1": {"id": "srv-1"}}})
+        )
+        adapter = _adapter(transport)
+        adapter._drafts_mailbox_id = "drafts-uuid"
+        adapter.save_draft(
+            in_reply_to="<x@y>",
+            body="body",
+            language="en",
+            from_addr=[{"email": "a@x"}],
+            to_addr=[{"email": "b@y"}],
+            subject="Re: x",
+        )
+        body = json.loads(transport.last_request.content)
+        create = body["methodCalls"][0][1]["create"]["draft1"]
+        assert "cc" not in create
+
+    def test_resolve_role_mailbox_id_caches_all_roles_in_one_call(self) -> None:
+        """resolve_role_mailbox_id performs one Mailbox/get for N lookups.
+
+        Single ``Mailbox/get`` response populates every role at once, so
+        subsequent lookups (drafts, inbox, sent, junk, …) never hit the
+        server again for the lifetime of the adapter. Assertion is enforced
+        by ``_MultiResponseTransport`` which queues exactly one response —
+        a second call would raise ``IndexError`` from ``pop(0)``.
+        """
+        transport = _MultiResponseTransport(
+            [
+                _jmap_response(
+                    "Mailbox/get",
+                    {
+                        "list": [
+                            {"id": "inbox-uuid", "role": "inbox"},
+                            {"id": "drafts-uuid", "role": "drafts"},
+                            {"id": "junk-uuid", "role": "junk"},
+                            {"id": "sent-uuid", "role": "sent"},
+                        ]
+                    },
+                )
+            ]
+        )
+        adapter = _adapter(transport)
+
+        assert adapter.resolve_role_mailbox_id("inbox") == "inbox-uuid"
+        assert adapter.resolve_role_mailbox_id("drafts") == "drafts-uuid"
+        assert adapter.resolve_role_mailbox_id("junk") == "junk-uuid"
+        assert adapter.resolve_role_mailbox_id("sent") == "sent-uuid"
+        # If a 2nd Mailbox/get had been sent, the pop(0) queue would be
+        # empty and the request would have raised IndexError.
+        assert len(transport.requests) == 1
+
+    def test_resolve_role_mailbox_id_raises_for_missing_role(self) -> None:
+        """RuntimeError names the role that could not be resolved."""
+        transport = _SingleResponseTransport(
+            _jmap_response(
+                "Mailbox/get",
+                {"list": [{"id": "inbox-uuid", "role": "inbox"}]},
+            )
+        )
+        adapter = _adapter(transport)
+        with pytest.raises(RuntimeError, match="role='junk'"):
+            adapter.resolve_role_mailbox_id("junk")
