@@ -13,8 +13,9 @@ from uuid import uuid4
 
 from typer.testing import CliRunner
 
-from twaky.cli.mail_sentinel import app as mail_sentinel_app  # type: ignore[import-untyped]
-
+from twaky.cli.mail_sentinel import (
+    app as mail_sentinel_app,  # type: ignore[import-untyped]
+)
 
 runner = CliRunner()
 
@@ -53,7 +54,7 @@ def test_rules_list_orders_by_priority() -> None:
     # First data row after the header must be the priority=40 rule
     assert "a_rule" in lines[1]
     # Disabled rule shown with "no" flag
-    assert "no" in [ln for ln in lines if "b_rule" in ln][0]
+    assert "no" in next(ln for ln in lines if "b_rule" in ln)
 
 
 def test_rules_list_enabled_only_flag() -> None:
@@ -141,7 +142,7 @@ def test_decisions_list_shows_recent_rows() -> None:
     assert "Second" in result.stdout
     # restored row shows "yes"
     lines = result.stdout.splitlines()
-    second = [ln for ln in lines if "b@y" in ln][0]
+    second = next(ln for ln in lines if "b@y" in ln)
     assert " yes " in second
 
 
