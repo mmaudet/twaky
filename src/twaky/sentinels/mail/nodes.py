@@ -698,9 +698,17 @@ def _build_reply_quote(latest: dict[str, Any], language: str) -> str:
         )
     received = str(latest.get("receivedAt") or "").split("T")[0]
     if language.lower().startswith("fr"):
-        attribution = f"Le {received}, {sender_display} a écrit :" if received else f"{sender_display} a écrit :"
+        attribution = (
+            f"Le {received}, {sender_display} a écrit :"
+            if received
+            else f"{sender_display} a écrit :"
+        )
     else:
-        attribution = f"On {received}, {sender_display} wrote:" if received else f"{sender_display} wrote:"
+        attribution = (
+            f"On {received}, {sender_display} wrote:"
+            if received
+            else f"{sender_display} wrote:"
+        )
 
     # Extract the plain-text body from bodyValues.
     body_text = ""
@@ -801,9 +809,7 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
         # Reply-all CC = original To + Cc minus (owner + reply_target duplicates).
         # Standard mail-client behaviour: keep every recipient in the loop.
         owner_email_lc = (ctx.owner_email or "").lower()
-        reply_target_lc = {
-            str(a.get("email", "")).lower() for a in reply_target
-        }
+        reply_target_lc = {str(a.get("email", "")).lower() for a in reply_target}
         cc_addr: list[dict[str, str]] = []
         seen_cc: set[str] = set()
         for src_field in ("to", "cc"):
@@ -845,9 +851,7 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
                     if tok.strip("<> ")
                 ]
                 break
-        references = prior_refs + (
-            [original_message_id] if original_message_id else []
-        )
+        references = prior_refs + ([original_message_id] if original_message_id else [])
         # From = the owner's identity. Prefer the configured display name;
         # fall back to the local-part of the email.
         owner_display = settings.twaky_owner_name or (
@@ -1042,9 +1046,43 @@ def _terminate(
     email_id: str = email["id"]
 
     if bucket in {"spam", "phishing-alert"}:
+        # Label + $junk keyword + move to the Junk mailbox (RFC 8621 role="junk").
+        # Bundle mailbox move with keywords in ONE Email/set for atomicity —
+        # otherwise a partial success could leave the mail labeled but still
+        # in INBOX, confusing both the user and any downstream filter.
+        # Restore (mail_sentinel_spam.py) uses the same generic
+        # ``resolve_role_mailbox_id`` helper to bring the mail back to INBOX.
         ctx.mail.label(email_id, "__spam__")
-        ctx.mail.set_keyword(email_id, "$junk", True)
         actions_applied = ["label:__spam__", "keyword:$junk"]
+        junk_move_ok = False
+        try:
+            resolver = getattr(ctx.mail, "resolve_role_mailbox_id", None)
+            junk_id = resolver("junk") if callable(resolver) else None
+            if junk_id:
+                # Fetch current mailboxIds to know what to unset (typically INBOX).
+                current_email = ctx.mail.get_email(email_id)
+                current_mboxes: dict[str, bool] = current_email.get("mailboxIds") or {}
+                mbox_patches: dict[str, bool] = {
+                    mid: False for mid in current_mboxes if mid != junk_id
+                }
+                mbox_patches[junk_id] = True
+                ctx.mail.set_keywords_bulk(
+                    email_id,
+                    {"$junk": True},
+                    mailbox_patches=mbox_patches,
+                )
+                actions_applied.append(f"move:junk({junk_id})")
+                junk_move_ok = True
+        except Exception:
+            log.exception(
+                "spam_triage: failed to move email=%s to Junk mailbox — "
+                "falling back to $junk keyword only",
+                email_id,
+            )
+        if not junk_move_ok:
+            # Fallback: at least set the $junk keyword so client-side filters
+            # (Twake Mail, Thunderbird) can still route the mail.
+            ctx.mail.set_keyword(email_id, "$junk", True)
     else:  # newsletter
         ctx.mail.label(email_id, "newsletter")
         ctx.mail.set_keyword(email_id, "nonjunk", True)

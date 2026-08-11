@@ -508,3 +508,117 @@ class TestNewsletterReturnShape:
         assert "newsletter" in adapter._labels.get("e1", [])
         assert adapter._keywords.get("e1", {}).get("nonjunk") is True
         ctx.base.mission_emitter.emit.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Spam / phishing-alert → move to Junk mailbox (RFC 8621 role="junk")
+# ---------------------------------------------------------------------------
+
+
+class TestSpamMoveToJunkMailbox:
+    """Spam & phishing-alert buckets move the email to the Junk mailbox.
+
+    Bundled atomically with the $junk keyword patch (single Email/set)
+    via the adapter's ``set_keywords_bulk(mailbox_patches=…)`` API.
+
+    Behaviour when the adapter cannot resolve a Junk mailbox (e.g. server
+    without one, or read-only test doubles) falls back to setting the
+    $junk keyword only. This preserves the SP6c behaviour on JMAP
+    implementations that lack a ``role="junk"`` mailbox.
+    """
+
+    def _adapter_with_junk_role(
+        self, inbox_id: str = "inbox-uuid", junk_id: str = "junk-uuid"
+    ) -> MagicMock:
+        """MagicMock MailAdapter that exposes resolve_role_mailbox_id + records
+        set_keywords_bulk calls."""
+        adapter = MagicMock()
+        adapter.resolve_role_mailbox_id.return_value = junk_id
+        adapter.get_email.return_value = {
+            "id": "e1",
+            "mailboxIds": {inbox_id: True},
+        }
+        # In-memory-esque tracking of label calls
+        adapter._labels: dict[str, list[str]] = {}
+        adapter.label.side_effect = lambda eid, lbl: adapter._labels.setdefault(
+            eid, []
+        ).append(lbl)
+        return adapter
+
+    def _ctx_with_adapter(
+        self, adapter: MagicMock, config_values: dict[str, Any] | None = None
+    ) -> NodeContext:
+        cv = config_values or {"spam_filter_enabled": True}
+        base = MagicMock()
+        base.sentinel_row.config_values = cv
+        base.mission_emitter.emit = MagicMock()
+        return NodeContext(base=base, mail=adapter, owner_email="owner@example.com")
+
+    def test_spam_bucket_moves_to_junk_mailbox_atomically(self) -> None:
+        """Stage 1 $junk keyword → bucket=spam → single set_keywords_bulk with
+        mailbox_patches: {inbox: False, junk: True}."""
+        adapter = self._adapter_with_junk_role()
+        ctx = self._ctx_with_adapter(adapter)
+        email = _email(keywords={"$junk": True})
+
+        node = make_spam_triage(ctx)
+        result = node(_state(email))  # type: ignore[arg-type]
+
+        assert result["spam_bucket"] == "spam"
+        # $junk was applied atomically WITH the mailbox move.
+        adapter.set_keywords_bulk.assert_called_once()
+        args, kwargs = adapter.set_keywords_bulk.call_args
+        assert args[0] == "e1"
+        assert args[1] == {"$junk": True}
+        assert kwargs["mailbox_patches"] == {
+            "inbox-uuid": False,
+            "junk-uuid": True,
+        }
+        # actions_applied surfaces the move so downstream Runs UI can show it.
+        assert any(a.startswith("move:junk(") for a in result["actions_applied"])
+
+    def test_phishing_alert_bucket_also_moves_to_junk(self) -> None:
+        """bucket=phishing-alert follows the same move-to-junk path as spam."""
+        adapter = self._adapter_with_junk_role()
+        ctx = self._ctx_with_adapter(adapter)
+        # Trigger phishing-alert via LLM grey-zone with confidence above threshold.
+        email = _email(
+            headers=[
+                {"name": "org.apache.james.rspamd.status", "value": "action=greylist"}
+            ]
+        )
+        with patch(
+            "twaky.sentinels.mail.nodes.structured_call",
+            return_value=SpamCheckOutput(
+                bucket="phishing-alert", confidence=0.99, reason="clear phishing"
+            ),
+        ):
+            result = make_spam_triage(ctx)(_state(email))  # type: ignore[arg-type]
+
+        assert result["spam_bucket"] == "phishing-alert"
+        adapter.set_keywords_bulk.assert_called_once()
+        _, kwargs = adapter.set_keywords_bulk.call_args
+        assert kwargs["mailbox_patches"]["junk-uuid"] is True
+
+    def test_falls_back_to_junk_keyword_when_no_junk_mailbox(self) -> None:
+        """Adapter without a Junk mailbox → set $junk keyword via set_keyword,
+        never crash the node."""
+        adapter = MagicMock()
+        adapter.resolve_role_mailbox_id.side_effect = RuntimeError(
+            "no mailbox with role='junk'"
+        )
+        adapter._labels = {}
+        adapter.label.side_effect = lambda eid, lbl: adapter._labels.setdefault(
+            eid, []
+        ).append(lbl)
+        ctx = self._ctx_with_adapter(adapter)
+        email = _email(keywords={"$junk": True})
+
+        result = make_spam_triage(ctx)(_state(email))  # type: ignore[arg-type]
+
+        assert result["spam_bucket"] == "spam"
+        # Fallback path: single set_keyword($junk=True), no set_keywords_bulk.
+        adapter.set_keyword.assert_called_with("e1", "$junk", True)
+        adapter.set_keywords_bulk.assert_not_called()
+        # No move:junk action reported in fallback.
+        assert not any(a.startswith("move:junk(") for a in result["actions_applied"])
