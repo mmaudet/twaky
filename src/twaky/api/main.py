@@ -18,6 +18,7 @@ from twaky.api.routers import (
     health,
     mail_sentinel,
     mail_sentinel_auth,
+    mail_sentinel_runs,
     mail_sentinel_spam,
     me,
     missions,
@@ -71,6 +72,7 @@ app.include_router(sentinels.router)
 app.include_router(mail_sentinel.router)
 app.include_router(mail_sentinel_auth.router)
 app.include_router(mail_sentinel_spam.router)
+app.include_router(mail_sentinel_runs.router)
 
 register_exception_handlers(app)
 
