@@ -195,7 +195,13 @@ class TestJmapMailAdapter:
         assert args["update"] == {"eml-2": {"keywords/$label-invoice": True}}
 
     def test_save_draft_returns_created_id(self) -> None:
-        """save_draft returns the key from the created dict."""
+        """save_draft returns the server-assigned id from the created entry.
+
+        Per RFC 8621 §5.3, the ``create`` key ("draft1") is a client-side
+        placeholder and the persisted id is the ``id`` property inside the
+        created response object. Callers need the server id to re-open,
+        update, or send the draft later.
+        """
         transport = _SingleResponseTransport(
             _jmap_response(
                 "Email/set",
@@ -209,8 +215,37 @@ class TestJmapMailAdapter:
             language="en",
         )
 
-        # The implementation returns the key (client-side name "draft1")
-        assert draft_id == "draft1"
+        assert draft_id == "srv-abc"
+
+    def test_save_draft_raises_when_not_created(self) -> None:
+        """save_draft raises RuntimeError with the notCreated reason (not StopIteration).
+
+        The previous implementation did ``next(iter(created.keys()))`` blindly
+        which raised ``StopIteration`` when the server refused the create —
+        LangGraph then converted that to a confusing ``RuntimeError: generator
+        raised StopIteration``. Now we surface the JMAP-level reason.
+        """
+        transport = _SingleResponseTransport(
+            _jmap_response(
+                "Email/set",
+                {
+                    "created": None,
+                    "notCreated": {
+                        "draft1": {
+                            "type": "invalidArguments",
+                            "description": "some field is not allowed",
+                        }
+                    },
+                },
+            )
+        )
+        adapter = _adapter(transport)
+        with pytest.raises(RuntimeError, match="notCreated"):
+            adapter.save_draft(
+                in_reply_to="<msg-001@example.com>",
+                body="Thank you",
+                language="en",
+            )
 
     def test_adapter_401_calls_refresh_now_and_retries(self) -> None:
         """On 401, refresh_now is called and request is retried with fresh token."""

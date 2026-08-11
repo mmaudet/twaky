@@ -316,8 +316,15 @@ class JmapMailAdapter:
     def save_draft(self, *, in_reply_to: str, body: str, language: str) -> str:
         """Create a draft reply via ``Email/set create``.
 
-        Returns the created key (``"draft1"``) or the server-assigned id if
-        the response nests it.
+        Returns the server-assigned id of the created draft. Raises
+        ``RuntimeError`` when the server refuses the create (surfacing the
+        ``notCreated`` reason so failures are debuggable instead of a
+        confusing ``StopIteration``).
+
+        Uses the RFC 8621 §4.1.3 typed-header syntax
+        (``header:In-Reply-To:asMessageIds``) rather than a generic
+        ``headers`` array — James JMAP rejects the array form on create with
+        ``JsonValidationError('headers' is not allowed)``.
         """
         result = self._call(
             "Email/set",
@@ -331,13 +338,17 @@ class JmapMailAdapter:
                         "subject": f"Re: (draft in {language})",
                         "textBody": [{"partId": "1", "type": "text/plain"}],
                         "bodyValues": {"1": {"value": body}},
-                        "headers": [{"name": "In-Reply-To", "value": in_reply_to}],
+                        "header:In-Reply-To:asMessageIds": [in_reply_to],
                     }
                 },
             },
         )
-        created: dict[str, Any] = result.get("created", {})
-        return next(iter(created.keys()))
+        created: dict[str, Any] = result.get("created") or {}
+        if not created:
+            not_created = result.get("notCreated") or {}
+            raise RuntimeError(f"save_draft: notCreated={not_created}")
+        entry: dict[str, Any] = next(iter(created.values()))
+        return str(entry.get("id") or next(iter(created.keys())))
 
     def set_keyword(self, email_id: str, keyword: str, value: bool) -> None:
         """Set a single keyword on an email via ``Email/set``."""
