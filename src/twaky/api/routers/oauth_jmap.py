@@ -58,7 +58,7 @@ async def _get_oidc_metadata() -> dict[str, str]:
 
     discovery_url = issuer + "/.well-known/openid-configuration"
     try:
-        async with httpx.AsyncClient(timeout=10.0) as http:
+        async with httpx.AsyncClient(timeout=30.0) as http:
             resp = await http.get(discovery_url)
         if resp.status_code == 200:
             metadata = resp.json()
@@ -279,7 +279,7 @@ async def jmap_callback(
         return _error_redirect(return_to, "session_probe_failed")
 
     try:
-        async with httpx.AsyncClient() as http:
+        async with httpx.AsyncClient(timeout=30.0) as http:
             session_resp = await http.get(
                 settings.jmap_session_url,
                 headers={"Authorization": f"Bearer {access_token}"},
