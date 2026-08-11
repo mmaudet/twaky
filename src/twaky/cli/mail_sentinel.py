@@ -83,6 +83,34 @@ class _DryRunAdapter:
     def move_to(self, email_id: str, mailbox_id: str) -> None:
         log.info("DRY-RUN: would move_to email=%s mailbox=%s", email_id, mailbox_id)
 
+    def save_draft(
+        self,
+        *,
+        in_reply_to: str,
+        body: str,
+        language: str,
+        from_addr: list[dict[str, str]] | None = None,
+        to_addr: list[dict[str, str]] | None = None,
+        subject: str | None = None,
+        references: list[str] | None = None,
+    ) -> str:
+        """Skip real JMAP draft creation; return a fake id + log the intent.
+
+        Previously ``save_draft`` fell through ``__getattr__`` to the real
+        adapter and created actual drafts in the user's Drafts folder during
+        ``--dry-run`` — which defeats the whole purpose of dry-run.
+        """
+        log.info(
+            "DRY-RUN: would save_draft in_reply_to=%s to=%s subject=%r "
+            "body_len=%d language=%s",
+            in_reply_to,
+            [a.get("email") for a in (to_addr or [])],
+            subject,
+            len(body),
+            language,
+        )
+        return f"dry-run-draft-{id(body)}"
+
 
 def _parse_since(since: str) -> str:
     """Accept ``24h`` / ``7d`` / ISO-8601 and return an ISO-8601 UTC string.
