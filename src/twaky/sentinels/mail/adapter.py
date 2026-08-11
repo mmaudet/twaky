@@ -27,7 +27,11 @@ _EMAIL_PROPERTIES = [
     "from",
     "to",
     "cc",
+    "replyTo",
     "subject",
+    "messageId",
+    "inReplyTo",
+    "references",
     "receivedAt",
     "preview",
     "textBody",
@@ -63,7 +67,17 @@ class MailAdapter(Protocol):
         """Mark an email as read."""
         ...
 
-    def save_draft(self, *, in_reply_to: str, body: str, language: str) -> str:
+    def save_draft(
+        self,
+        *,
+        in_reply_to: str,
+        body: str,
+        language: str,
+        from_addr: list[dict[str, str]] | None = None,
+        to_addr: list[dict[str, str]] | None = None,
+        subject: str | None = None,
+        references: list[str] | None = None,
+    ) -> str:
         """Save a draft reply and return the assigned draft id."""
         ...
 
@@ -130,7 +144,17 @@ class InMemoryMailAdapter:
         """Add *email_id* to the read set."""
         self._read.add(email_id)
 
-    def save_draft(self, *, in_reply_to: str, body: str, language: str) -> str:
+    def save_draft(
+        self,
+        *,
+        in_reply_to: str,
+        body: str,
+        language: str,
+        from_addr: list[dict[str, str]] | None = None,
+        to_addr: list[dict[str, str]] | None = None,
+        subject: str | None = None,
+        references: list[str] | None = None,
+    ) -> str:
         """Store a draft and return its assigned id (``draft-N``)."""
         draft_id = f"draft-{len(self._drafts) + 1}"
         self._drafts.append(
@@ -139,6 +163,10 @@ class InMemoryMailAdapter:
                 "in_reply_to": in_reply_to,
                 "body": body,
                 "language": language,
+                "from": from_addr or [],
+                "to": to_addr or [],
+                "subject": subject,
+                "references": references or [],
             }
         )
         return draft_id
@@ -339,7 +367,17 @@ class JmapMailAdapter:
             "save_draft: no mailbox with role='drafts' found on this account"
         )
 
-    def save_draft(self, *, in_reply_to: str, body: str, language: str) -> str:
+    def save_draft(
+        self,
+        *,
+        in_reply_to: str,
+        body: str,
+        language: str,
+        from_addr: list[dict[str, str]] | None = None,
+        to_addr: list[dict[str, str]] | None = None,
+        subject: str | None = None,
+        references: list[str] | None = None,
+    ) -> str:
         """Create a draft reply via ``Email/set create``.
 
         Returns the server-assigned id of the created draft. Raises
@@ -348,31 +386,56 @@ class JmapMailAdapter:
         confusing ``StopIteration``).
 
         Uses the RFC 8621 §4.1.3 typed-header syntax
-        (``header:In-Reply-To:asMessageIds``) rather than a generic
-        ``headers`` array — James JMAP rejects the array form on create with
+        (``header:In-Reply-To:asMessageIds`` and
+        ``header:References:asMessageIds``) rather than a generic ``headers``
+        array — James JMAP rejects the array form on create with
         ``JsonValidationError('headers' is not allowed)``.
 
         Resolves the Drafts mailbox id via ``Mailbox/get`` on first call;
         the symbolic ``$drafts`` name in ``mailboxIds`` is rejected by James
         JMAP with ``Invalid UUID string: $drafts``.
+
+        Parameters
+        ----------
+        in_reply_to:
+            Message-Id header value of the message being replied to. Wrapped
+            with angle brackets by JMAP itself. Passed as-is; caller is
+            responsible for extracting it from the ``messageId`` property or
+            the ``Message-ID`` header of the original message.
+        body:
+            Plain-text body content.
+        language:
+            BCP-47 language tag, used as a fallback in the placeholder
+            subject when *subject* is not provided.
+        from_addr, to_addr:
+            Envelope addresses as JMAP EmailAddress dicts
+            (``[{"name": "...", "email": "..."}, ...]``). Both default to
+            empty lists when omitted (SP6 legacy behaviour); callers
+            wanting a valid draft SHOULD provide them.
+        subject:
+            Reply subject line (typically ``"Re: <original subject>"``).
+            Falls back to ``"Re: (draft in <language>)"`` when omitted.
+        references:
+            Optional ``References`` header value(s): the reply chain of
+            Message-Ids for RFC 5322 threading. Passed with the JMAP
+            ``asMessageIds`` typed-header setter when non-empty.
         """
         drafts_id = self._resolve_drafts_mailbox_id()
+        create_body: dict[str, Any] = {
+            "mailboxIds": {drafts_id: True},
+            "keywords": {"$draft": True},
+            "from": from_addr or [],
+            "to": to_addr or [],
+            "subject": subject or f"Re: (draft in {language})",
+            "textBody": [{"partId": "1", "type": "text/plain"}],
+            "bodyValues": {"1": {"value": body}},
+            "header:In-Reply-To:asMessageIds": [in_reply_to],
+        }
+        if references:
+            create_body["header:References:asMessageIds"] = references
         result = self._call(
             "Email/set",
-            {
-                "create": {
-                    "draft1": {
-                        "mailboxIds": {drafts_id: True},
-                        "keywords": {"$draft": True},
-                        "from": [],
-                        "to": [],
-                        "subject": f"Re: (draft in {language})",
-                        "textBody": [{"partId": "1", "type": "text/plain"}],
-                        "bodyValues": {"1": {"value": body}},
-                        "header:In-Reply-To:asMessageIds": [in_reply_to],
-                    }
-                },
-            },
+            {"create": {"draft1": create_body}},
         )
         created: dict[str, Any] = result.get("created") or {}
         if not created:

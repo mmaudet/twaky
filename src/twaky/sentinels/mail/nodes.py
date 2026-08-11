@@ -750,11 +750,62 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
             use_case=UseCase.DRAFT_REPLY,
         )
 
-        # Save draft
+        # --- Compute reply envelope from the message being replied to ---
+        # Reply-To wins over From per RFC 5322; falls back to From otherwise.
+        reply_target: list[dict[str, str]] = (
+            latest.get("replyTo") or latest.get("from") or []
+        )
+        # RFC 5322 subject convention: "Re: <subject>" unless already prefixed.
+        original_subject = str(latest.get("subject") or "").strip()
+        reply_subject = (
+            original_subject
+            if original_subject.lower().startswith(("re:", "re :"))
+            else f"Re: {original_subject}"
+        )
+        # In-Reply-To + References must be the RFC 5322 Message-Id, NOT the
+        # JMAP email id. JMAP exposes it via the ``messageId`` property or the
+        # ``Message-ID`` header. We check both.
+        message_id_list: list[str] = latest.get("messageId") or []
+        original_message_id: str = ""
+        if message_id_list:
+            original_message_id = str(message_id_list[0])
+        else:
+            for h in latest.get("headers") or []:
+                if str(h.get("name", "")).lower() == "message-id":
+                    original_message_id = str(h.get("value", "")).strip("<> ")
+                    break
+        # References = existing References + Message-Id of parent (RFC 5322 §3.6.4)
+        prior_refs: list[str] = []
+        for h in latest.get("headers") or []:
+            if str(h.get("name", "")).lower() == "references":
+                # Space-separated <id> tokens per RFC 5322
+                prior_refs = [
+                    tok.strip("<> ")
+                    for tok in str(h.get("value", "")).split()
+                    if tok.strip("<> ")
+                ]
+                break
+        references = prior_refs + (
+            [original_message_id] if original_message_id else []
+        )
+        # From = the owner's identity. Name derived from local part when not
+        # available server-side.
+        owner_local = ctx.owner_email.split("@")[0] if ctx.owner_email else ""
+        from_addr = (
+            [{"name": owner_local, "email": ctx.owner_email}]
+            if ctx.owner_email
+            else []
+        )
+
+        # Save draft with the computed envelope
         draft_id = ctx.mail.save_draft(
-            in_reply_to=latest.get("id", ""),
+            in_reply_to=original_message_id or latest.get("id", ""),
             body=out.body,
             language=out.language,
+            from_addr=from_addr,
+            to_addr=reply_target,
+            subject=reply_subject,
+            references=references,
         )
 
         # Emit mission with evidence
