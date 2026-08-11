@@ -319,3 +319,110 @@ def replay_command(
     )
     if dry_run:
         typer.echo("DRY-RUN: no JMAP side-effects applied.")
+
+
+# ---------------------------------------------------------------------------
+# rules — sub-command group (list, toggle)
+# ---------------------------------------------------------------------------
+
+rules_app = typer.Typer(
+    help="Inspect and toggle mail-sentinel rules stored in mail_sentinel_rule."
+)
+app.add_typer(rules_app, name="rules")
+
+
+def _fmt_actions(actions: list[str], max_width: int = 40) -> str:
+    joined = ",".join(actions)
+    return joined if len(joined) <= max_width else joined[: max_width - 1] + "…"
+
+
+@rules_app.command("list")
+def rules_list_command(
+    enabled_only: bool = typer.Option(
+        False, "--enabled-only", help="Skip disabled rules."
+    ),
+) -> None:
+    """List every mail-sentinel rule ordered by priority."""
+    from twaky.sentinels.mail.store import rules as rules_store
+
+    all_rules = rules_store.list_all(enabled_only=enabled_only)
+    if not all_rules:
+        typer.echo("(no rules)")
+        return
+    ordered = sorted(all_rules, key=lambda r: (r.priority, r.name))
+    typer.echo(f"{'prio':>4} {'enabled':>7} {'name':<24} actions")
+    for r in ordered:
+        flag = "yes" if r.enabled else "no"
+        typer.echo(f"{r.priority:>4} {flag:>7} {r.name:<24} {_fmt_actions(r.actions)}")
+
+
+@rules_app.command("toggle")
+def rules_toggle_command(
+    name: str = typer.Argument(..., help="Rule name to enable/disable."),
+) -> None:
+    """Flip a rule's ``enabled`` flag. Safe / reversible / non-destructive."""
+    from twaky.sentinels.mail.store import rules as rules_store
+
+    rule = rules_store.by_name(name)
+    if rule is None:
+        typer.echo(f"rule {name!r} not found", err=True)
+        raise typer.Exit(code=1)
+    updated = rules_store.update(rule.id, {"enabled": not rule.enabled})
+    state_str = "enabled" if updated.enabled else "disabled"
+    typer.echo(f"rule {updated.name!r} → {state_str}")
+
+
+# ---------------------------------------------------------------------------
+# decisions — sub-command group (list, stats)
+# ---------------------------------------------------------------------------
+
+decisions_app = typer.Typer(help="Inspect recent spam decisions and per-bucket stats.")
+app.add_typer(decisions_app, name="decisions")
+
+
+@decisions_app.command("list")
+def decisions_list_command(
+    recent: int = typer.Option(
+        20, "--recent", "-n", min=1, max=200, help="Number of rows to display."
+    ),
+    bucket: str | None = typer.Option(
+        None,
+        "--bucket",
+        help="Filter by bucket (spam / newsletter / phishing-alert).",
+    ),
+) -> None:
+    """List the most recent mail_sentinel_spam_decision rows."""
+    from twaky.sentinels.mail.store import spam_decisions
+
+    rows = spam_decisions.list_recent(bucket=bucket, limit=recent)
+    if not rows:
+        typer.echo("(no decisions)")
+        return
+    typer.echo(
+        f"{'decided_at':<20} {'bucket':<15} {'signal':<24} "
+        f"{'restored':>8} sender · subject"
+    )
+    for d in rows:
+        rest = "yes" if d.restored_at else "-"
+        subj = (d.subject or "")[:45].replace("\n", " ")
+        typer.echo(
+            f"{d.decided_at.strftime('%Y-%m-%d %H:%M:%S'):<20} "
+            f"{d.bucket:<15} {d.signal_source:<24} {rest:>8} "
+            f"{d.sender_email} · {subj}"
+        )
+
+
+@decisions_app.command("stats")
+def decisions_stats_command(
+    days: int = typer.Option(30, "--days", min=1, max=365, help="Window size in days."),
+) -> None:
+    """Show per-bucket counts over the last ``--days`` days."""
+    from twaky.sentinels.mail.store import spam_decisions
+
+    s = spam_decisions.stats(days=days)
+    typer.echo(f"Last {days} days:")
+    typer.echo(f"  spam:            {s['spam']}")
+    typer.echo(f"  newsletter:      {s['newsletter']}")
+    typer.echo(f"  phishing-alert:  {s['phishing_alert']}")
+    typer.echo(f"  restored:        {s['restored']}")
+    typer.echo(f"  total processed: {s['total_processed']}")
