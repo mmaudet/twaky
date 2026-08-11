@@ -192,6 +192,9 @@ class JmapMailAdapter:
         self._token_provider = token_provider
         self._refresh_now = refresh_now
         self._client = httpx.Client(timeout=30.0)
+        # Lazily resolved Drafts mailbox id — James JMAP rejects the symbolic
+        # ``$drafts`` name in ``mailboxIds`` and expects the actual UUID.
+        self._drafts_mailbox_id: str | None = None
 
     # ------------------------------------------------------------------
     # Internal helper
@@ -313,6 +316,29 @@ class JmapMailAdapter:
             },
         )
 
+    def _resolve_drafts_mailbox_id(self) -> str:
+        """Resolve and cache the Drafts mailbox id via ``Mailbox/get``.
+
+        James JMAP requires ``mailboxIds`` on ``Email/set create`` to reference
+        the actual UUID of the Drafts mailbox — the symbolic role name
+        ``$drafts`` is rejected with ``Invalid UUID string: $drafts``. This
+        method fetches the mailbox list once and caches the id found by
+        ``role='drafts'`` (RFC 8621 §2.1.4).
+        """
+        if self._drafts_mailbox_id is not None:
+            return self._drafts_mailbox_id
+        result = self._call(
+            "Mailbox/get",
+            {"ids": None, "properties": ["id", "role"]},
+        )
+        for mbox in result.get("list") or []:
+            if mbox.get("role") == "drafts":
+                self._drafts_mailbox_id = str(mbox["id"])
+                return self._drafts_mailbox_id
+        raise RuntimeError(
+            "save_draft: no mailbox with role='drafts' found on this account"
+        )
+
     def save_draft(self, *, in_reply_to: str, body: str, language: str) -> str:
         """Create a draft reply via ``Email/set create``.
 
@@ -325,13 +351,18 @@ class JmapMailAdapter:
         (``header:In-Reply-To:asMessageIds``) rather than a generic
         ``headers`` array — James JMAP rejects the array form on create with
         ``JsonValidationError('headers' is not allowed)``.
+
+        Resolves the Drafts mailbox id via ``Mailbox/get`` on first call;
+        the symbolic ``$drafts`` name in ``mailboxIds`` is rejected by James
+        JMAP with ``Invalid UUID string: $drafts``.
         """
+        drafts_id = self._resolve_drafts_mailbox_id()
         result = self._call(
             "Email/set",
             {
                 "create": {
                     "draft1": {
-                        "mailboxIds": {"$drafts": True},
+                        "mailboxIds": {drafts_id: True},
                         "keywords": {"$draft": True},
                         "from": [],
                         "to": [],

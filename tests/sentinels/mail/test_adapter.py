@@ -209,6 +209,9 @@ class TestJmapMailAdapter:
             )
         )
         adapter = _adapter(transport)
+        # Pre-seed the Drafts mailbox id to bypass the Mailbox/get resolution
+        # call — the transport mock only responds to the Email/set request.
+        adapter._drafts_mailbox_id = "drafts-mbox-uuid"
         draft_id = adapter.save_draft(
             in_reply_to="<msg-001@example.com>",
             body="Thank you",
@@ -240,12 +243,52 @@ class TestJmapMailAdapter:
             )
         )
         adapter = _adapter(transport)
+        adapter._drafts_mailbox_id = "drafts-mbox-uuid"
         with pytest.raises(RuntimeError, match="notCreated"):
             adapter.save_draft(
                 in_reply_to="<msg-001@example.com>",
                 body="Thank you",
                 language="en",
             )
+
+    def test_save_draft_resolves_drafts_mailbox_and_uses_uuid(self) -> None:
+        """save_draft calls Mailbox/get on first invocation to resolve drafts UUID.
+
+        James JMAP rejects ``mailboxIds: {"$drafts": True}`` with ``Invalid
+        UUID string: $drafts``. The adapter must resolve the actual UUID of
+        the mailbox with ``role='drafts'`` and reference it by UUID in the
+        create body. This id is cached on the adapter so subsequent calls
+        skip the Mailbox/get round-trip.
+        """
+        mailbox_response = _jmap_response(
+            "Mailbox/get",
+            {
+                "list": [
+                    {"id": "inbox-uuid", "role": "inbox"},
+                    {"id": "drafts-uuid-123", "role": "drafts"},
+                    {"id": "sent-uuid", "role": "sent"},
+                ]
+            },
+        )
+        create_response = _jmap_response(
+            "Email/set",
+            {"created": {"draft1": {"id": "new-draft-srv-id"}}},
+        )
+        transport = _MultiResponseTransport([mailbox_response, create_response])
+        adapter = _adapter(transport)
+
+        draft_id = adapter.save_draft(
+            in_reply_to="<msg@x>", body="body", language="en"
+        )
+
+        assert draft_id == "new-draft-srv-id"
+        assert adapter._drafts_mailbox_id == "drafts-uuid-123"
+        # The Email/set create body must reference the drafts UUID, not $drafts
+        create_body = json.loads(transport.requests[1].content)
+        create_args = create_body["methodCalls"][0][1]
+        assert create_args["create"]["draft1"]["mailboxIds"] == {
+            "drafts-uuid-123": True
+        }
 
     def test_adapter_401_calls_refresh_now_and_retries(self) -> None:
         """On 401, refresh_now is called and request is retried with fresh token."""
