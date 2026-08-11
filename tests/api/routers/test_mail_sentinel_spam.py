@@ -238,11 +238,21 @@ def test_restore_502_when_jmap_fails(monkeypatch):
 
 
 def test_restore_happy_path_updates_and_returns(monkeypatch):
-    """Monkeypatch adapter as MagicMock; POST → 200 with restored_at set."""
+    """Monkeypatch adapter as MagicMock; POST → 200 with restored_at set.
+
+    Verifies the JMAP restore now:
+    - Adds the email back to INBOX via ``mailbox_patches`` (fixes the
+      match_rules ``archive`` collision described in the fix commit).
+    - Clears ``$label-newsletter`` and ``$label-__spam__`` (the actual
+      keyword names the sentinel writes via ``adapter.label()`` which
+      prefixes ``$label-``) in addition to the legacy unprefixed
+      ``__spam__``/``newsletter`` for back-compat.
+    """
     row = _seed_decision()
 
     mock_adapter = MagicMock()
     mock_adapter.set_keywords_bulk.return_value = None
+    mock_adapter.resolve_role_mailbox_id.return_value = "inbox-mbox-uuid"
     monkeypatch.setattr(
         "twaky.api.routers.mail_sentinel_spam._get_mail_adapter",
         lambda: mock_adapter,
@@ -255,15 +265,18 @@ def test_restore_happy_path_updates_and_returns(monkeypatch):
     assert body["restored_at"] is not None
     assert body["restored_by"] == "alice@x"
 
-    # Verify JMAP was called with the right keyword patches
+    mock_adapter.resolve_role_mailbox_id.assert_called_once_with("inbox")
     mock_adapter.set_keywords_bulk.assert_called_once_with(
         row.email_id,
         {
             "$junk": False,
             "nonjunk": True,
+            "$label-__spam__": False,
+            "$label-newsletter": False,
             "__spam__": False,
             "newsletter": False,
         },
+        mailbox_patches={"inbox-mbox-uuid": True},
     )
 
 

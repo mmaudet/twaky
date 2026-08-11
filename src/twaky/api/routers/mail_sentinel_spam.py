@@ -162,19 +162,41 @@ def restore(
             status_code=409,
         )
 
-    # Phase 2 — JMAP keyword patch (failure aborts restore; DB untouched)
+    # Phase 2 — JMAP restore: clear spam markers + re-add to INBOX.
+    # The mail may have been archived by ``match_rules`` firing a rule with
+    # an ``archive`` action after ``spam_triage`` set the bucket — so we
+    # can't rely on the original design assumption that mailboxIds is
+    # untouched. All patches go in ONE Email/set for atomicity.
     try:
         adapter = _get_mail_adapter()
+        inbox_id: str | None = None
+        resolver = getattr(adapter, "resolve_role_mailbox_id", None)
+        if callable(resolver):
+            try:
+                inbox_id = resolver("inbox")
+            except Exception:  # noqa: BLE001
+                inbox_id = None  # keep going; keywords still get cleared
+        mailbox_patches: dict[str, bool] = (
+            {inbox_id: True} if inbox_id else {}
+        )
         adapter.set_keywords_bulk(
             d.email_id,
             {
+                # Spam / nonjunk flags
                 "$junk": False,
                 "nonjunk": True,
+                # Label keywords: the sentinel writes labels via
+                # ``adapter.label()`` which prefixes ``$label-``. Legacy
+                # unprefixed names kept for backward compatibility with any
+                # decisions written before this fix.
+                "$label-__spam__": False,
+                "$label-newsletter": False,
                 "__spam__": False,
                 "newsletter": False,
             },
+            mailbox_patches=mailbox_patches,
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.exception("JMAP restore failed for decision %s", decision_id)
         return error_response(
             code="jmap_restore_failed",

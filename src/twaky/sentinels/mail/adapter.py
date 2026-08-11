@@ -86,8 +86,20 @@ class MailAdapter(Protocol):
         """Set a single keyword on an email to a boolean value."""
         ...
 
-    def set_keywords_bulk(self, email_id: str, patches: dict[str, bool]) -> None:
-        """Atomically set multiple keywords on an email in a single operation."""
+    def set_keywords_bulk(
+        self,
+        email_id: str,
+        patches: dict[str, bool],
+        *,
+        mailbox_patches: dict[str, bool] | None = None,
+    ) -> None:
+        """Atomically set multiple keywords (and optionally mailbox membership).
+
+        ``mailbox_patches`` maps mailbox-id → bool and controls whether the
+        email is added to (``True``) or removed from (``False``) that
+        mailbox. Bundled into the same JMAP round-trip when non-empty so
+        restore semantics (unarchive + clear labels) stay atomic.
+        """
         ...
 
 
@@ -109,6 +121,7 @@ class InMemoryMailAdapter:
         self._read: set[str] = set()
         self._drafts: list[dict[str, Any]] = []
         self._keywords: dict[str, dict[str, bool]] = {}
+        self._mailboxes: dict[str, dict[str, bool]] = {}
 
     # ------------------------------------------------------------------
     # Helper
@@ -178,10 +191,23 @@ class InMemoryMailAdapter:
         """Store a single keyword value for an email."""
         self._keywords.setdefault(email_id, {})[keyword] = value
 
-    def set_keywords_bulk(self, email_id: str, patches: dict[str, bool]) -> None:
-        """Store multiple keyword values for an email."""
+    def set_keywords_bulk(
+        self,
+        email_id: str,
+        patches: dict[str, bool],
+        *,
+        mailbox_patches: dict[str, bool] | None = None,
+    ) -> None:
+        """Store multiple keyword values (and optional mailbox membership)."""
         for k, v in patches.items():
             self.set_keyword(email_id, k, v)
+        if mailbox_patches:
+            mbox_map = self._mailboxes.setdefault(email_id, {})
+            for mbox_id, add in mailbox_patches.items():
+                if add:
+                    mbox_map[mbox_id] = True
+                else:
+                    mbox_map.pop(mbox_id, None)
 
 
 class JmapMailAdapter:
@@ -226,6 +252,9 @@ class JmapMailAdapter:
         # Lazily resolved Drafts mailbox id — James JMAP rejects the symbolic
         # ``$drafts`` name in ``mailboxIds`` and expects the actual UUID.
         self._drafts_mailbox_id: str | None = None
+        # Cache of resolved mailbox ids keyed by JMAP ``role`` (RFC 8621 §2.1.4).
+        # Populated on demand by ``_resolve_role_mailbox_id``.
+        self._mailbox_ids_by_role: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Internal helper
@@ -347,28 +376,49 @@ class JmapMailAdapter:
             },
         )
 
-    def _resolve_drafts_mailbox_id(self) -> str:
-        """Resolve and cache the Drafts mailbox id via ``Mailbox/get``.
+    def resolve_role_mailbox_id(self, role: str) -> str:
+        """Resolve and cache the id of the mailbox with the given RFC 8621 role.
 
-        James JMAP requires ``mailboxIds`` on ``Email/set create`` to reference
-        the actual UUID of the Drafts mailbox — the symbolic role name
-        ``$drafts`` is rejected with ``Invalid UUID string: $drafts``. This
-        method fetches the mailbox list once and caches the id found by
-        ``role='drafts'`` (RFC 8621 §2.1.4).
+        JMAP mailbox roles are the portable way to reference standard folders
+        (``"inbox"``, ``"drafts"``, ``"sent"``, ``"trash"``, ``"junk"``,
+        ``"archive"``, …). James JMAP rejects symbolic names like ``$drafts``
+        in ``mailboxIds``; callers must use the actual UUID resolved here.
+
+        Results are cached per-adapter-instance under
+        ``self._mailbox_ids_by_role``. On the first call for any role, a
+        single ``Mailbox/get`` fetches the full mailbox list (with ``id`` +
+        ``role``) and populates every role at once — subsequent lookups are
+        free.
+
+        Raises ``RuntimeError`` when no mailbox carries the requested role.
         """
-        if self._drafts_mailbox_id is not None:
-            return self._drafts_mailbox_id
+        if role in self._mailbox_ids_by_role:
+            return self._mailbox_ids_by_role[role]
         result = self._call(
             "Mailbox/get",
             {"ids": None, "properties": ["id", "role"]},
         )
         for mbox in result.get("list") or []:
-            if mbox.get("role") == "drafts":
-                self._drafts_mailbox_id = str(mbox["id"])
-                return self._drafts_mailbox_id
-        raise RuntimeError(
-            "save_draft: no mailbox with role='drafts' found on this account"
-        )
+            m_role = mbox.get("role")
+            if m_role:
+                self._mailbox_ids_by_role[str(m_role)] = str(mbox["id"])
+        if role not in self._mailbox_ids_by_role:
+            raise RuntimeError(
+                f"no mailbox with role={role!r} found on this account"
+            )
+        return self._mailbox_ids_by_role[role]
+
+    def _resolve_drafts_mailbox_id(self) -> str:
+        """Back-compat alias — resolves the Drafts mailbox id.
+
+        Kept for callers written before the generic
+        ``resolve_role_mailbox_id`` helper existed. Delegates to it and
+        keeps the legacy per-role cache in sync.
+        """
+        if self._drafts_mailbox_id is not None:
+            return self._drafts_mailbox_id
+        self._drafts_mailbox_id = self.resolve_role_mailbox_id("drafts")
+        return self._drafts_mailbox_id
 
     def save_draft(
         self,
@@ -461,9 +511,25 @@ class JmapMailAdapter:
             },
         )
 
-    def set_keywords_bulk(self, email_id: str, patches: dict[str, bool]) -> None:
-        """Atomically set multiple keywords on an email in a single ``Email/set`` call."""
-        patch_dict = {f"keywords/{k}": v for k, v in patches.items()}
+    def set_keywords_bulk(
+        self,
+        email_id: str,
+        patches: dict[str, bool],
+        *,
+        mailbox_patches: dict[str, bool] | None = None,
+    ) -> None:
+        """Atomically set keywords + optionally patch mailbox membership.
+
+        Both patches are sent in the same ``Email/set`` update so restore
+        semantics (unarchive + clear labels) stay atomic — a partial success
+        would leave the email in an inconsistent state.
+        """
+        patch_dict: dict[str, bool] = {
+            f"keywords/{k}": v for k, v in patches.items()
+        }
+        if mailbox_patches:
+            for mbox_id, add in mailbox_patches.items():
+                patch_dict[f"mailboxIds/{mbox_id}"] = add
         self._call(
             "Email/set",
             {

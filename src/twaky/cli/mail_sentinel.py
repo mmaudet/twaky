@@ -70,11 +70,18 @@ class _DryRunAdapter:
             value,
         )
 
-    def set_keywords_bulk(self, email_id: str, patches: dict[str, bool]) -> None:
+    def set_keywords_bulk(
+        self,
+        email_id: str,
+        patches: dict[str, bool],
+        *,
+        mailbox_patches: dict[str, bool] | None = None,
+    ) -> None:
         log.info(
-            "DRY-RUN: would set_keywords_bulk email=%s patches=%s",
+            "DRY-RUN: would set_keywords_bulk email=%s patches=%s mailbox_patches=%s",
             email_id,
             patches,
+            mailbox_patches or {},
         )
 
     def archive(self, email_id: str) -> None:
