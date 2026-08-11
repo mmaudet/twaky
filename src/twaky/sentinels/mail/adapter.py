@@ -257,16 +257,22 @@ class JmapMailAdapter:
         return emails[0]
 
     def get_thread(self, thread_id: str) -> list[dict[str, Any]]:
-        """Return all emails in a thread, sorted by ``receivedAt`` ascending."""
-        result = self._call(
-            "Email/query",
-            {
-                "filter": {"inThread": thread_id},
-                "sort": [{"property": "receivedAt"}],
-            },
-        )
-        ids: list[str] = result.get("ids", [])
-        return [self.get_email(eid) for eid in ids]
+        """Return all emails in a thread, sorted by ``receivedAt`` ascending.
+
+        Uses ``Thread/get`` to resolve the ordered list of ``emailIds``, then
+        fetches each with ``get_email``. Some JMAP implementations (notably
+        James JMAP as of 2026) do not support ``Email/query filter:inThread``
+        and reject the request with ``invalidArguments: '[inThread]' was
+        unsupported filter options``; ``Thread/get`` is the portable primitive
+        defined by RFC 8621 §5 and works across implementations.
+        """
+        result = self._call("Thread/get", {"ids": [thread_id]})
+        threads = result.get("list") or []
+        if not threads:
+            return []
+        email_ids: list[str] = threads[0].get("emailIds") or []
+        emails = [self.get_email(eid) for eid in email_ids]
+        return sorted(emails, key=lambda e: e.get("receivedAt", ""))
 
     def label(self, email_id: str, label: str) -> None:
         """Apply a label using the Linagora ``$label-<name>`` keyword extension."""
