@@ -49,7 +49,15 @@ pytestmark = [
 
 @pytest.fixture(autouse=True)
 def _wipe():
-    """Delete all rows from mail_sentinel_spam_decision before/after each test."""
+    """Delete all rows from mail_sentinel_spam_decision before/after each test.
+
+    Guarded by TWAKY_ALLOW_DESTRUCTIVE_TESTS — see
+    ``docs/superpowers/investigations/2026-08-12-spam-decision-purge.md``.
+    """
+    from tests._conftest_helpers import destructive_wipe_allowed, skip_reason
+
+    if not destructive_wipe_allowed():
+        pytest.skip(skip_reason())
     with psycopg.connect(_dsn(), autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM mail_sentinel_spam_decision")
     yield

@@ -63,7 +63,15 @@ def _env(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _wipe():
-    """Wipe sentinel_run + spam_decision rows before and after each test."""
+    """Wipe sentinel_run + spam_decision rows before and after each test.
+
+    Guarded by TWAKY_ALLOW_DESTRUCTIVE_TESTS — see
+    ``docs/superpowers/investigations/2026-08-12-spam-decision-purge.md``.
+    """
+    from tests._conftest_helpers import destructive_wipe_allowed, skip_reason
+
+    if not destructive_wipe_allowed():
+        pytest.skip(skip_reason())
     _truncate()
     yield
     _truncate()
