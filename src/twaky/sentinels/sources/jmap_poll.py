@@ -211,21 +211,23 @@ class JmapPollingEventSource(EventSource):
         account_id: str,
         inbox_id: str,
     ) -> str:
-        """Capture the current queryState via Email/query (no full listing).
+        """Capture the current Email/get state (no full listing).
 
-        Returns the ``queryState`` string to be persisted as the initial
-        ``sinceState`` for the first delta poll.
+        Email/changes requires ``sinceState`` in the same UUID format that
+        Email/get returns as ``state`` — this is distinct from Email/query's
+        ``queryState`` (an opaque hex string in James JMAP that Email/changes
+        rejects with "error.expected.uuid"). Calling Email/get with ids=[]
+        avoids pulling any content while returning the current mail collection
+        state suitable for Email/changes.
         """
         body = {
             "using": _JMAP_USING,
             "methodCalls": [
                 [
-                    "Email/query",
+                    "Email/get",
                     {
                         "accountId": account_id,
-                        "filter": {"inMailbox": inbox_id},
-                        "limit": 1,
-                        "calculateTotal": False,
+                        "ids": [],
                     },
                     "0",
                 ]
@@ -235,9 +237,9 @@ class JmapPollingEventSource(EventSource):
         resp = await client.post(api_url, json=body, headers=headers)
         resp.raise_for_status()
         data = resp.json()
-        query_state: str = data["methodResponses"][0][1]["queryState"]
-        log.info("jmap_poll: seeded queryState=%s", query_state)
-        return query_state
+        state: str = data["methodResponses"][0][1]["state"]
+        log.info("jmap_poll: seeded state=%s", state)
+        return state
 
     async def _poll_changes(
         self,
