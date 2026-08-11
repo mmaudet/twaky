@@ -45,6 +45,11 @@ from twaky.sentinels.sources.base import Ack, EventSource, _noop_ack
 log = logging.getLogger(__name__)
 
 _MAIL_CAPABILITY = "urn:ietf:params:jmap:mail"
+_CORE_CAPABILITY = "urn:ietf:params:jmap:core"
+# James JMAP requires clients to declare both `core` and `mail` capabilities in
+# the `using` array of every methodCall — missing `core` yields
+# "Missing capability(ies): urn:ietf:params:jmap:core" errors.
+_JMAP_USING = [_CORE_CAPABILITY, _MAIL_CAPABILITY]
 
 # Properties fetched for each new email.
 _EMAIL_PROPERTIES = [
@@ -155,7 +160,7 @@ class JmapPollingEventSource(EventSource):
 
         # Step 2: mailbox list
         mailbox_body = {
-            "using": [_MAIL_CAPABILITY],
+            "using": _JMAP_USING,
             "methodCalls": [
                 [
                     "Mailbox/get",
@@ -212,7 +217,7 @@ class JmapPollingEventSource(EventSource):
         ``sinceState`` for the first delta poll.
         """
         body = {
-            "using": [_MAIL_CAPABILITY],
+            "using": _JMAP_USING,
             "methodCalls": [
                 [
                     "Email/query",
@@ -243,7 +248,7 @@ class JmapPollingEventSource(EventSource):
     ) -> tuple[str, list[str]]:
         """Run Email/changes.  Return ``(newState, created_ids)``."""
         body = {
-            "using": [_MAIL_CAPABILITY],
+            "using": _JMAP_USING,
             "methodCalls": [
                 [
                     "Email/changes",
@@ -274,7 +279,7 @@ class JmapPollingEventSource(EventSource):
     ) -> list[dict[str, Any]]:
         """Run Email/get for *ids*.  Return the list of email objects."""
         body = {
-            "using": [_MAIL_CAPABILITY],
+            "using": _JMAP_USING,
             "methodCalls": [
                 [
                     "Email/get",
