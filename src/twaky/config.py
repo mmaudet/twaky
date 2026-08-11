@@ -19,6 +19,22 @@ class Settings(BaseSettings):
         ...,  # required — no default
         description="Email of the sole owner this instance serves.",
     )
+    twaky_owner_name: str = Field(
+        default="",
+        description=(
+            "Display name of the owner (e.g. 'Michel-Marie Maudet'). "
+            "Used as the display name in outgoing draft From address."
+        ),
+    )
+    mail_sentinel_signature: str = Field(
+        default="",
+        description=(
+            "Multi-line personal signature appended verbatim to every draft "
+            "the mail sentinel produces. Line-breaks are preserved. LLMs are "
+            "instructed not to invent a signature — this string is the "
+            "authoritative one."
+        ),
+    )
 
     # --- Twaky Postgres+AGE ---
     twaky_pg_host: str = Field(default="twaky-pg")

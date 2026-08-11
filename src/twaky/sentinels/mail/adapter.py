@@ -75,6 +75,7 @@ class MailAdapter(Protocol):
         language: str,
         from_addr: list[dict[str, str]] | None = None,
         to_addr: list[dict[str, str]] | None = None,
+        cc_addr: list[dict[str, str]] | None = None,
         subject: str | None = None,
         references: list[str] | None = None,
     ) -> str:
@@ -152,6 +153,7 @@ class InMemoryMailAdapter:
         language: str,
         from_addr: list[dict[str, str]] | None = None,
         to_addr: list[dict[str, str]] | None = None,
+        cc_addr: list[dict[str, str]] | None = None,
         subject: str | None = None,
         references: list[str] | None = None,
     ) -> str:
@@ -165,6 +167,7 @@ class InMemoryMailAdapter:
                 "language": language,
                 "from": from_addr or [],
                 "to": to_addr or [],
+                "cc": cc_addr or [],
                 "subject": subject,
                 "references": references or [],
             }
@@ -375,6 +378,7 @@ class JmapMailAdapter:
         language: str,
         from_addr: list[dict[str, str]] | None = None,
         to_addr: list[dict[str, str]] | None = None,
+        cc_addr: list[dict[str, str]] | None = None,
         subject: str | None = None,
         references: list[str] | None = None,
     ) -> str:
@@ -431,6 +435,8 @@ class JmapMailAdapter:
             "bodyValues": {"1": {"value": body}},
             "header:In-Reply-To:asMessageIds": [in_reply_to],
         }
+        if cc_addr:
+            create_body["cc"] = cc_addr
         if references:
             create_body["header:References:asMessageIds"] = references
         result = self._call(

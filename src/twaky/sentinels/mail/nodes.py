@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from twaky.config import settings
 from twaky.sentinels.mail.adapter import MailAdapter
 from twaky.sentinels.mail.llm.hardening import Hardening
 from twaky.sentinels.mail.llm.invoke import structured_call
@@ -681,6 +682,48 @@ def make_select_memories(
     return _node
 
 
+def _build_reply_quote(latest: dict[str, Any], language: str) -> str:
+    """Format the original message as a quoted block for the reply body.
+
+    Follows the widely-accepted mail-client convention: an attribution line
+    (``On <date>, <sender> wrote:``) followed by each line of the original
+    body prefixed with ``> ``. Localised to French when ``language == "fr"``.
+    Empty body → returns the attribution line only.
+    """
+    from_list: list[dict[str, str]] = latest.get("from") or []
+    sender_display = ""
+    if from_list:
+        sender_display = str(from_list[0].get("name") or "").strip() or str(
+            from_list[0].get("email") or ""
+        )
+    received = str(latest.get("receivedAt") or "").split("T")[0]
+    if language.lower().startswith("fr"):
+        attribution = f"Le {received}, {sender_display} a écrit :" if received else f"{sender_display} a écrit :"
+    else:
+        attribution = f"On {received}, {sender_display} wrote:" if received else f"{sender_display} wrote:"
+
+    # Extract the plain-text body from bodyValues.
+    body_text = ""
+    body_values = latest.get("bodyValues") or {}
+    text_body = latest.get("textBody") or []
+    if text_body and isinstance(text_body, list):
+        first_part_id = str(text_body[0].get("partId") or "")
+        part = body_values.get(first_part_id) or {}
+        body_text = str(part.get("value") or "")
+    # Fallback: any first value we can find.
+    if not body_text and body_values:
+        first = next(iter(body_values.values()))
+        body_text = str((first or {}).get("value") or "")
+    # Last-ditch fallback: preview.
+    if not body_text:
+        body_text = str(latest.get("preview") or "")
+
+    if not body_text.strip():
+        return attribution
+    quoted_lines = [f"> {ln}" if ln else ">" for ln in body_text.splitlines()]
+    return attribution + "\n" + "\n".join(quoted_lines)
+
+
 def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentState]:
     """Factory for the draft_reply node.
 
@@ -755,6 +798,23 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
         reply_target: list[dict[str, str]] = (
             latest.get("replyTo") or latest.get("from") or []
         )
+        # Reply-all CC = original To + Cc minus (owner + reply_target duplicates).
+        # Standard mail-client behaviour: keep every recipient in the loop.
+        owner_email_lc = (ctx.owner_email or "").lower()
+        reply_target_lc = {
+            str(a.get("email", "")).lower() for a in reply_target
+        }
+        cc_addr: list[dict[str, str]] = []
+        seen_cc: set[str] = set()
+        for src_field in ("to", "cc"):
+            for addr in latest.get(src_field) or []:
+                email_lc = str(addr.get("email", "")).lower()
+                if not email_lc or email_lc == owner_email_lc:
+                    continue
+                if email_lc in reply_target_lc or email_lc in seen_cc:
+                    continue
+                seen_cc.add(email_lc)
+                cc_addr.append(addr)
         # RFC 5322 subject convention: "Re: <subject>" unless already prefixed.
         original_subject = str(latest.get("subject") or "").strip()
         reply_subject = (
@@ -788,22 +848,38 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
         references = prior_refs + (
             [original_message_id] if original_message_id else []
         )
-        # From = the owner's identity. Name derived from local part when not
-        # available server-side.
-        owner_local = ctx.owner_email.split("@")[0] if ctx.owner_email else ""
+        # From = the owner's identity. Prefer the configured display name;
+        # fall back to the local-part of the email.
+        owner_display = settings.twaky_owner_name or (
+            ctx.owner_email.split("@")[0] if ctx.owner_email else ""
+        )
         from_addr = (
-            [{"name": owner_local, "email": ctx.owner_email}]
+            [{"name": owner_display, "email": ctx.owner_email}]
             if ctx.owner_email
             else []
         )
 
-        # Save draft with the computed envelope
+        # --- Compose the final body: LLM reply + signature + quoted original ---
+        # Post-append the configured signature — the LLM is instructed NOT to
+        # invent one but often does anyway; overriding here ensures the real
+        # signature (title, phone, legal notice) is always present.
+        final_body = out.body.rstrip()
+        signature = (settings.mail_sentinel_signature or "").strip()
+        if signature:
+            final_body = f"{final_body}\n\n{signature}"
+        # Quote the original message underneath (standard mail-client behaviour).
+        quoted = _build_reply_quote(latest, out.language)
+        if quoted:
+            final_body = f"{final_body}\n\n{quoted}"
+
+        # Save draft with the computed envelope + composed body
         draft_id = ctx.mail.save_draft(
             in_reply_to=original_message_id or latest.get("id", ""),
-            body=out.body,
+            body=final_body,
             language=out.language,
             from_addr=from_addr,
             to_addr=reply_target,
+            cc_addr=cc_addr,
             subject=reply_subject,
             references=references,
         )

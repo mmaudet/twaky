@@ -91,6 +91,7 @@ class _DryRunAdapter:
         language: str,
         from_addr: list[dict[str, str]] | None = None,
         to_addr: list[dict[str, str]] | None = None,
+        cc_addr: list[dict[str, str]] | None = None,
         subject: str | None = None,
         references: list[str] | None = None,
     ) -> str:
@@ -101,10 +102,11 @@ class _DryRunAdapter:
         ``--dry-run`` — which defeats the whole purpose of dry-run.
         """
         log.info(
-            "DRY-RUN: would save_draft in_reply_to=%s to=%s subject=%r "
+            "DRY-RUN: would save_draft in_reply_to=%s to=%s cc=%s subject=%r "
             "body_len=%d language=%s",
             in_reply_to,
             [a.get("email") for a in (to_addr or [])],
+            [a.get("email") for a in (cc_addr or [])],
             subject,
             len(body),
             language,

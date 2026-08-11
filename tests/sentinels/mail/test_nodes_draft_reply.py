@@ -90,11 +90,16 @@ class TestDraftReply:
         assert result["draft"] == "Bonjour Alice, merci pour ton message."
         assert result["draft_language"] == "fr"
 
-        # Verify draft was saved
+        # Verify draft was saved: body starts with LLM output and continues
+        # with the quoted-original block appended by the node (post-processing:
+        # LLM body + optional signature + attribution + '> …' quoted lines).
         assert len(adapter._drafts) == 1
         saved_draft = adapter._drafts[0]
         assert saved_draft["in_reply_to"] == "e1"
-        assert saved_draft["body"] == "Bonjour Alice, merci pour ton message."
+        assert saved_draft["body"].startswith(
+            "Bonjour Alice, merci pour ton message."
+        )
+        assert "a écrit :" in saved_draft["body"]  # attribution line (fr)
         assert saved_draft["language"] == "fr"
 
         # Verify mission was emitted
