@@ -234,14 +234,38 @@ def replay_command(
         base=ctx, mail=adapter, owner_email=settings.twaky_owner_email
     )
 
-    counts: dict[str | None, int] = {}
+    bucket_counts: dict[str | None, int] = {}
+    rule_counts: dict[str | None, int] = {}
     for i, email_id in enumerate(email_ids, 1):
         try:
             state = process_email(node_ctx, email_id)
             bucket = state.get("spam_bucket")
-            counts[bucket] = counts.get(bucket, 0) + 1
+            rule_name = state.get("rule_name")
+            matched_by = state.get("matched_by")
+            actions = state.get("actions_applied") or []
+            has_draft = bool(state.get("draft"))
+            thread = state.get("thread") or []
+            sender = ""
+            subject = ""
+            if thread:
+                latest = thread[-1]
+                sender = (latest.get("from") or [{}])[0].get("email", "")[:32]
+                subject = (latest.get("subject") or "")[:40]
+
+            bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+            rule_key = f"{rule_name} ({matched_by})" if rule_name else None
+            rule_counts[rule_key] = rule_counts.get(rule_key, 0) + 1
+
+            draft_flag = "draft" if has_draft else "-"
+            actions_str = ",".join(actions[:3]) or "-"
             typer.echo(
-                f"[{i}/{len(email_ids)}] email={email_id[:16]}… bucket={bucket!r}"
+                f"[{i}/{len(email_ids)}] {email_id[:12]}… "
+                f"bucket={bucket or '-':<15} "
+                f"rule={(rule_name or '-'):<16} "
+                f"via={(matched_by or '-'):<18} "
+                f"draft={draft_flag:<5} "
+                f"actions={actions_str} "
+                f"from={sender} · {subject}"
             )
         except Exception as exc:  # noqa: BLE001
             typer.echo(
@@ -250,6 +274,11 @@ def replay_command(
             )
 
     typer.echo("")
-    typer.echo(f"summary: {dict(sorted(counts.items(), key=lambda kv: str(kv[0])))}")
+    typer.echo(
+        f"bucket summary: {dict(sorted(bucket_counts.items(), key=lambda kv: str(kv[0])))}"
+    )
+    typer.echo(
+        f"rule   summary: {dict(sorted(rule_counts.items(), key=lambda kv: str(kv[0])))}"
+    )
     if dry_run:
         typer.echo("DRY-RUN: no JMAP side-effects applied.")
