@@ -93,15 +93,14 @@ async def test_stop_event_causes_listen_to_return():
         except (TimeoutError, asyncio.CancelledError):
             pass
 
-        # Verify no _run threads remain after a short grace period.
+        # Verify no notify_run threads remain after a short grace period.
         await asyncio.sleep(0.2)
         leaked = [
             t
             for t in threading.enumerate()
-            if getattr(t, "_target", None) is not None
-            and getattr(t._target, "__name__", "") == "_run"  # type: ignore[attr-defined]
+            if t.name.startswith("notify_run")
         ]
-        assert leaked == [], f"Leaked _run threads: {leaked}"
+        assert leaked == [], f"Leaked notify_run threads: {leaked}"
 
 
 # ---------------------------------------------------------------------------
@@ -134,10 +133,9 @@ async def test_broker_stop_joins_within_2s():
             leaked = [
                 t
                 for t in threading.enumerate()
-                if getattr(t, "_target", None) is not None
-                and getattr(t._target, "__name__", "") == "_run"  # type: ignore[attr-defined]
+                if t.name.startswith("notify_run")
             ]
             if leaked:
                 await asyncio.sleep(0.1)
 
-        assert leaked == [], f"Leaked _run threads after broker.stop(): {leaked}"
+        assert leaked == [], f"Leaked notify_run threads after broker.stop(): {leaked}"
