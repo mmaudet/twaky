@@ -56,4 +56,5 @@ dev = [
 [tool.pytest.ini_options]
 markers = [
     "integration: tests requiring a live Postgres/RabbitMQ",
+    "jmap_live: tests requiring a real JMAP account (TWAKY_JMAP_LIVE=1 to run; skipped otherwise)",
 ]
