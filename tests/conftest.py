@@ -7,6 +7,7 @@ import uuid
 
 import httpx
 import pytest
+import pytest_asyncio
 
 # ---------------------------------------------------------------------------
 # jmap_live marker machinery
@@ -44,7 +45,7 @@ _JMAP_CORE = "urn:ietf:params:jmap:core"
 _JMAP_MAIL = "urn:ietf:params:jmap:mail"
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def jmap_live_folder() -> object:
     """Provision a throwaway JMAP mailbox for the duration of one test.
 
