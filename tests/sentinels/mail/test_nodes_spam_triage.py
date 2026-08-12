@@ -630,3 +630,180 @@ class TestSpamMoveToJunkMailbox:
         adapter.set_keywords_bulk.assert_not_called()
         # No move:junk action reported in fallback.
         assert not any(a.startswith("move:junk(") for a in result["actions_applied"])
+
+
+# ---------------------------------------------------------------------------
+# SP6d T1 D4: Provenance capture tests
+# ---------------------------------------------------------------------------
+
+
+class TestTerminateProvenanceCapture:
+    """Tests for origin_mailbox_id / origin_mailbox_role / envelope_headers
+    capture added in SP6d T1 D2.
+
+    These tests patch ``spam_decisions.insert`` to avoid live DB writes and
+    to assert the provenance keyword arguments passed by ``_terminate``.
+    """
+
+    INBOX_ID = "inbox-uuid"
+    JUNK_ID = "junk-uuid"
+
+    def _adapter_with_roles(self) -> InMemoryMailAdapter:
+        """InMemoryMailAdapter pre-loaded with inbox + junk mailbox roles."""
+        return InMemoryMailAdapter(
+            mailbox_roles={
+                self.INBOX_ID: "inbox",
+                self.JUNK_ID: "junk",
+            }
+        )
+
+    def _ctx_with_adapter(
+        self, adapter: InMemoryMailAdapter, config_values: dict[str, Any] | None = None
+    ) -> NodeContext:
+        cv = config_values or {"spam_filter_enabled": True}
+        base = MagicMock()
+        base.sentinel_row.config_values = cv
+        base.mission_emitter.emit = MagicMock()
+        return NodeContext(base=base, mail=adapter, owner_email="owner@example.com")
+
+    def _email_with_mailboxes(
+        self,
+        email_id: str = "e1",
+        mailbox_ids: list[str] | None = None,
+        headers: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Build an email whose mailboxIds list matches *mailbox_ids*."""
+        mbox_ids = mailbox_ids or [self.INBOX_ID]
+        return {
+            "id": email_id,
+            "threadId": "t1",
+            "receivedAt": "2026-08-12T10:00:00Z",
+            "from": [{"email": "spammer@evil.com", "name": "Spammer"}],
+            "to": [{"email": "owner@example.com", "name": "Owner"}],
+            "subject": "Spam subject",
+            "preview": "Spam preview",
+            "keywords": {"$junk": True},
+            "mailboxIds": {mid: True for mid in mbox_ids},
+            "headers": headers or [],
+            "hasAttachment": False,
+        }
+
+    def test_terminate_captures_origin_mailbox_when_spam(self) -> None:
+        """_terminate captures origin_mailbox_id + origin_mailbox_role before Junk move.
+
+        Email has mailboxIds=[inbox_id, junk_id]; the origin is inbox_id
+        (first id that is not the junk mailbox) with role 'inbox'.
+        """
+        adapter = self._adapter_with_roles()
+        ctx = self._ctx_with_adapter(adapter)
+
+        # Pre-load email into the adapter so get_email() works in _terminate.
+        email = self._email_with_mailboxes(
+            mailbox_ids=[self.INBOX_ID, self.JUNK_ID],
+        )
+        adapter.add(email)
+
+        node = make_spam_triage(ctx)
+
+        with patch(
+            "twaky.sentinels.mail.nodes.spam_decisions.insert",
+            return_value=__import__("uuid").uuid4(),
+        ) as mock_insert:
+            result = node({"email_id": email["id"], "thread": [email]})  # type: ignore[arg-type]
+
+        assert result["spam_bucket"] == "spam"
+        mock_insert.assert_called_once()
+        call_kwargs = mock_insert.call_args.kwargs
+        assert call_kwargs["origin_mailbox_id"] == self.INBOX_ID
+        assert call_kwargs["origin_mailbox_role"] == "inbox"
+
+    def test_terminate_captures_envelope_headers_subset(self) -> None:
+        """_terminate passes only whitelisted header keys to spam_decisions.insert.
+
+        The email has 'list-unsubscribe', 'x-custom-noise', and 'from'.
+        Only the whitelisted keys must appear in envelope_headers.
+        """
+        adapter = self._adapter_with_roles()
+        ctx = self._ctx_with_adapter(adapter)
+
+        email = self._email_with_mailboxes(
+            mailbox_ids=[self.INBOX_ID],
+            headers=[
+                {"name": "from", "value": "spammer@evil.com"},
+                {"name": "list-unsubscribe", "value": "<mailto:unsub@evil.com>"},
+                {"name": "x-custom-noise", "value": "should be excluded"},
+                {"name": "subject", "value": "Spam subject"},
+            ],
+        )
+        adapter.add(email)
+
+        node = make_spam_triage(ctx)
+
+        with patch(
+            "twaky.sentinels.mail.nodes.spam_decisions.insert",
+            return_value=__import__("uuid").uuid4(),
+        ) as mock_insert:
+            node({"email_id": email["id"], "thread": [email]})  # type: ignore[arg-type]
+
+        mock_insert.assert_called_once()
+        envelope_headers = mock_insert.call_args.kwargs["envelope_headers"]
+        assert envelope_headers is not None
+        assert "from" in envelope_headers
+        assert "list-unsubscribe" in envelope_headers
+        assert "subject" in envelope_headers
+        assert "x-custom-noise" not in envelope_headers
+
+    def test_terminate_newsletter_bucket_does_not_capture_provenance(self) -> None:
+        """For bucket='newsletter', origin_* and envelope_headers must be None."""
+        # Newsletter is triggered by heuristic_newsletter: list-unsubscribe
+        # present + dkim present (score=2, < 5).
+        adapter = self._adapter_with_roles()
+        cv = {"spam_filter_enabled": True}
+        base = MagicMock()
+        base.sentinel_row.config_values = cv
+        base.mission_emitter.emit = MagicMock()
+        ctx = NodeContext(base=base, mail=adapter, owner_email="owner@example.com")
+
+        email: dict[str, Any] = {
+            "id": "newsletter-e1",
+            "threadId": "t-nl",
+            "receivedAt": "2026-08-12T10:00:00Z",
+            "from": [{"email": "news@newsletter.com", "name": "Newsletter"}],
+            "to": [{"email": "owner@example.com", "name": "Owner"}],
+            "subject": "Our weekly digest",
+            "preview": "Newsletter content",
+            "keywords": {},
+            "mailboxIds": {self.INBOX_ID: True},
+            "headers": [
+                {
+                    "name": "list-unsubscribe",
+                    "value": "<mailto:unsub@newsletter.com>",
+                },
+                {
+                    "name": "list-unsubscribe-post",
+                    "value": "List-Unsubscribe=One-Click",
+                },
+                {"name": "dkim-signature", "value": "v=1; a=rsa-sha256; ..."},
+            ],
+            "hasAttachment": False,
+        }
+        adapter.add(email)
+
+        node = make_spam_triage(ctx)
+
+        with (
+            patch(
+                "twaky.sentinels.mail.nodes.spam_decisions.insert",
+                return_value=__import__("uuid").uuid4(),
+            ) as mock_insert,
+            patch("twaky.sentinels.mail.nodes.structured_call") as mock_llm,
+        ):
+            result = node({"email_id": email["id"], "thread": [email]})  # type: ignore[arg-type]
+
+        mock_llm.assert_not_called()  # heuristic, not LLM
+        assert result["spam_bucket"] == "newsletter"
+        mock_insert.assert_called_once()
+        call_kwargs = mock_insert.call_args.kwargs
+        assert call_kwargs["origin_mailbox_id"] is None
+        assert call_kwargs["origin_mailbox_role"] is None
+        assert call_kwargs["envelope_headers"] is None
