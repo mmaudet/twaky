@@ -150,7 +150,9 @@ function RulesTab() {
                             <TableHead>Conditions</TableHead>
                             <TableHead>Actions</TableHead>
                             <TableHead>Enabled</TableHead>
-                            <TableHead>Priority</TableHead>
+                            <TableHead title="Lower priority runs first">
+                                Priority <span aria-hidden="true">↑</span>
+                            </TableHead>
                             <TableHead className="w-36" />
                         </TableRow>
                     </TableHeader>
