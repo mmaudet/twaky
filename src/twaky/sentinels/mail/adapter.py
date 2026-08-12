@@ -301,6 +301,10 @@ class JmapMailAdapter:
         # Parallel cache keyed by mailbox id → role, populated on the same
         # Mailbox/get fetch as ``_mailbox_ids_by_role``.
         self._mailbox_roles_by_id: dict[str, str] = {}
+        # Set to True after the first Mailbox/get completes, even when the
+        # server returns zero role-tagged mailboxes.  Guards against an
+        # infinite re-fetch loop in resolve_mailbox_role_by_id.
+        self._mailboxes_fetched: bool = False
 
     # ------------------------------------------------------------------
     # Internal helper
@@ -438,6 +442,7 @@ class JmapMailAdapter:
             if m_role:
                 self._mailbox_ids_by_role[str(m_role)] = m_id
                 self._mailbox_roles_by_id[m_id] = str(m_role)
+        self._mailboxes_fetched = True
 
     def resolve_role_mailbox_id(self, role: str) -> str:
         """Resolve and cache the id of the mailbox with the given RFC 8621 role.
@@ -471,8 +476,10 @@ class JmapMailAdapter:
         """
         if mid in self._mailbox_roles_by_id:
             return self._mailbox_roles_by_id[mid]
-        # Cache may be empty if this is the first call; fetch all mailboxes.
-        if not self._mailbox_roles_by_id:
+        # Fetch all mailboxes on the first call; use the fetched flag so that
+        # an account with zero role-tagged mailboxes does not trigger an
+        # infinite re-fetch loop.
+        if not self._mailboxes_fetched:
             self._fetch_all_mailboxes()
         return self._mailbox_roles_by_id.get(mid)
 
