@@ -141,21 +141,13 @@ class TestRecoveryHandlesAwaitingUser:
     """Regression: sub-project 2's parked bug — is_resume guard was too narrow."""
 
     def test_awaiting_user_mission_takes_resume_branch(self, monkeypatch):
-        """Verifies the ``is_resume`` guard covers AWAITING_USER (sub-project 2 bug).
+        """Verifies the fallthrough guard keeps AWAITING_USER missions intact.
 
-        Redesigned: instead of asserting on the mission's final state (which
-        required the fake graph to emit ``__ATLAS_FINISH__`` from AWAITING_USER
-        — an illegal transition per the state machine's ``_ALLOWED[AWAITING_USER]
-        = {RUNNING, CANCELLED, FAILED}`` mapping), we now assert directly on
-        the DAEMON'S BEHAVIOUR: was ``build_atlas_agent`` invoked with the
-        resume branch's kwargs?
-
-        The fake graph now returns a plain assistant message (no
-        ``__ATLAS_FINISH__`` marker), so ``_last_finish_marker`` returns
-        None and the daemon skips the illegal engine.finish() call. That
-        proves the resume guard fired — a fresh-branch code path would
-        have crashed on the AWAITING_USER precondition long before
-        ``build_atlas_agent`` returned.
+        The fake graph returns without ``__ATLAS_FINISH__`` and without
+        pending user input, so the fallthrough path fires. The guard
+        re-reads the mission state (AWAITING_USER), determines it is not
+        RUNNING, and returns without calling engine.finish — leaving the
+        mission in AWAITING_USER.
 
         See flake #8 in
         docs/superpowers/investigations/2026-08-10-nine-flakes.md.
@@ -173,28 +165,13 @@ class TestRecoveryHandlesAwaitingUser:
         # Mission is now AWAITING_USER. Simulate recovery driving it.
 
         # Fake graph: plain assistant message, NO __ATLAS_FINISH__ marker.
-        # Not emitting the marker keeps _last_finish_marker → None and
-        # prevents the daemon from attempting the illegal
-        # AWAITING_USER → DONE transition. The point of the test is the
-        # resume-branch guard, not the finish call.
+        # The fallthrough guard is what protects the mission from an
+        # illegal AWAITING_USER → DONE transition attempt.
         fake_graph = MagicMock()
         fake_graph.invoke.return_value = {
             "messages": [MagicMock(content="acknowledged user response")],
             "artifacts": [],
         }
-
-        # ``engine.finish`` is patched to a no-op: after the graph returns
-        # without a __ATLAS_FINISH__ marker AND without pending user input,
-        # _run_mission_sync's fallthrough tries ``engine.finish(mid, "done")``.
-        # From AWAITING_USER that's an illegal transition (state machine
-        # allows only {RUNNING, CANCELLED, FAILED}). The fallthrough is a
-        # daemon-code shortcoming worth fixing separately; here we neutralise
-        # it so the test can focus on its actual invariant (the resume
-        # branch guard fired).
-        finish_calls: list = []
-        engine_finish_stub = MagicMock(
-            side_effect=lambda *a, **kw: finish_calls.append((a, kw))
-        )
 
         with (
             patch(
@@ -205,26 +182,72 @@ class TestRecoveryHandlesAwaitingUser:
                 "twaky.daemon.atlas_daemon.extract_pending_from_output",
                 return_value=None,
             ),
-            patch("twaky.daemon.atlas_daemon.engine.finish", engine_finish_stub),
         ):
             atlas_daemon._run_mission_sync(m.id)
 
-        # Load-bearing: the fake graph was invoked. Reaching invoke() from
-        # AWAITING_USER only happens via the resume branch — the fresh
-        # branch would have raised InvalidTransition on the mission's
-        # precondition check before build_atlas_agent ever returned.
+        # The resume branch fired (invoke was called).
         assert fake_graph.invoke.called, (
             "build_atlas_agent's invoke was never called — the resume branch "
             "did not fire on an AWAITING_USER mission"
         )
 
+        # The guard prevented the illegal transition: mission stays AWAITING_USER.
         got = repository.get(m.id)
-        # And the mission must NOT be failed with an InvalidTransition
-        # reason — the guard prevented the illegal AWAITING_USER→DONE
-        # attempt.
-        assert got.state != MissionState.FAILED or "InvalidTransition" not in (
-            got.state_reason or ""
+        assert got.state == MissionState.AWAITING_USER, (
+            f"Expected mission to remain AWAITING_USER after fallthrough guard, "
+            f"got {got.state!r} (reason: {got.state_reason!r})"
         )
+
+        _cleanup_mission(m.id)
+
+    def test_running_mission_reaches_fallthrough_finish_normally(self):
+        """Guard does not block the legitimate RUNNING → DONE fallthrough path.
+
+        A RUNNING mission whose fake graph returns without ``__ATLAS_FINISH__``
+        and without pending user input should be finished with
+        state_reason == "ended_without_finish_marker".
+        """
+        from unittest.mock import MagicMock, patch
+
+        from twaky.daemon import atlas_daemon
+        from twaky.missions import engine, repository
+        from twaky.missions.models import MissionState, PlanStep
+
+        m = engine.declare(
+            intent_text="rec-running-fallthrough",
+            owner_email="a@x",
+            declared_by="a@x",
+        )
+        engine.start_planning(m.id)
+        engine.commit_plan(m.id, [PlanStep(agent="atlas", tool="noop", args={})])
+        # Mission is now RUNNING.
+
+        fake_graph = MagicMock()
+        fake_graph.invoke.return_value = {
+            "messages": [MagicMock(content="no finish marker")],
+            "artifacts": [],
+        }
+
+        with (
+            patch(
+                "twaky.daemon.atlas_daemon.build_atlas_agent", return_value=fake_graph
+            ),
+            patch("twaky.daemon.atlas_daemon.get_checkpointer", return_value=None),
+            patch(
+                "twaky.daemon.atlas_daemon.extract_pending_from_output",
+                return_value=None,
+            ),
+        ):
+            atlas_daemon._run_mission_sync(m.id, is_fresh_claim=True)
+
+        got = repository.get(m.id)
+        assert got.state == MissionState.DONE, (
+            f"Expected RUNNING fallthrough to reach DONE, got {got.state!r}"
+        )
+        assert got.state_reason == "ended_without_finish_marker", (
+            f"Unexpected state_reason: {got.state_reason!r}"
+        )
+
         _cleanup_mission(m.id)
 
 

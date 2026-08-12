@@ -291,7 +291,6 @@ def forget_pattern(
 # 9. POST /mail-sentinel/rules/propose  (SP6d)
 # ---------------------------------------------------------------------------
 
-_MAX_PROPOSE_COUNT = 2000
 _MAX_EXAMPLES = 10
 
 
@@ -364,23 +363,9 @@ def propose_rule(
         )
 
     # ------------------------------------------------------------------
-    # 2. Reject window.count > MAX_PROPOSE_COUNT.
+    # 2. Load historical decisions.
     # ------------------------------------------------------------------
-    count = body.window.count
-    if count > _MAX_PROPOSE_COUNT:
-        return error_response(
-            code="validation_failed",
-            message=(
-                f"window.count {count} exceeds the maximum allowed value of "
-                f"{_MAX_PROPOSE_COUNT}; reduce it and retry"
-            ),
-            status_code=422,
-        )
-
-    # ------------------------------------------------------------------
-    # 3. Load historical decisions.
-    # ------------------------------------------------------------------
-    decisions = spam_decisions.list_recent(bucket=None, limit=count)
+    decisions = spam_decisions.list_recent(bucket=None, limit=body.window.count)
 
     # ------------------------------------------------------------------
     # 4. Load earlier-priority enabled rules (priority < proposed priority).

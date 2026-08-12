@@ -50,7 +50,11 @@ class SSEBroker:
         from twaky.daemon.notify import listen
 
         try:
-            async for _channel, payload in listen(["mission_changed"], settings.pg_dsn):
+            async for _channel, payload in listen(
+                ["mission_changed"],
+                settings.pg_dsn,
+                stop_event=self._stop_event,
+            ):
                 if self._stop_event.is_set():
                     break
                 try:

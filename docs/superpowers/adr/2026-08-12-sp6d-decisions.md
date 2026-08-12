@@ -82,6 +82,16 @@ enumerate fields), add an opt-in query flag AND note the deprecation
 window in the response header or docs. Flip the default only after
 a migration window (e.g. one release).
 
+**Refinement (SP6e):** `POST /mail-sentinel/spam/{id}/restore`
+intentionally does NOT surface `origin_mailbox_role` or
+`origin_mailbox_id` even when the client sends `?with_provenance=1`.
+Rationale: restore is a mutation response whose shape is considered
+stable and additive-free; mutating callers should not depend on
+provenance fields being present in the response. Callers that need
+provenance after a restore can re-fetch the record via
+`GET /mail-sentinel/spam?with_provenance=1`. This is a documented
+intentional design choice, not a bug.
+
 ## Consequences
 
 - The Propose endpoint cannot fully evaluate rules using `field:

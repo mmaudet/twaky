@@ -278,6 +278,17 @@ def _run_mission_sync(mid: UUID, *, is_fresh_claim: bool = False) -> None:
 
     # LLM ended without calling finish_mission — treat as done with whatever
     # answer we have, but log a warning.
+    # Guard: re-read the mission state — the graph invoke may have transitioned
+    # it (e.g. AWAITING_USER via request_user_input). Calling finish() from a
+    # non-RUNNING state raises InvalidTransition and strands the mission.
+    current = repository.get(mid)
+    if current is None or current.state != MissionState.RUNNING:
+        log.warning(
+            "fallthrough guard: mission not RUNNING, skipping finish",
+            mission_id=str(mid),
+            state=str(current.state) if current is not None else "missing",
+        )
+        return
     log.warning("mission ended without finish_mission", mission_id=str(mid))
     engine.finish(
         mid,

@@ -389,7 +389,6 @@ __all__ = [
     "AlreadyRestored",
     "SpamDecision",
     "SpamDecisionNotFound",
-    "_reset_column_cache_for_tests",
     "get",
     "insert",
     "list_recent",

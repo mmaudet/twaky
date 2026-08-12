@@ -597,3 +597,36 @@ class TestJmapMailAdapter:
         adapter = _adapter(transport)
         with pytest.raises(RuntimeError, match="role='junk'"):
             adapter.resolve_role_mailbox_id("junk")
+
+    def test_resolve_mailbox_role_by_id_no_role_mailboxes(self) -> None:
+        """When the server returns zero role-tagged mailboxes the fetch runs exactly once.
+
+        Regression guard: the old guard ``if not self._mailbox_roles_by_id``
+        would re-trigger Mailbox/get on every call because the dict stays
+        empty.  With ``_mailboxes_fetched`` the second call is served from
+        cache (empty) without a second round-trip.
+        """
+        transport = _MultiResponseTransport(
+            [
+                _jmap_response(
+                    "Mailbox/get",
+                    {
+                        # Server returns mailboxes but none has a role set.
+                        "list": [
+                            {"id": "custom-mbox-1", "role": None},
+                            {"id": "custom-mbox-2", "role": None},
+                        ]
+                    },
+                )
+            ]
+        )
+        adapter = _adapter(transport)
+
+        result_first = adapter.resolve_mailbox_role_by_id("some-id")
+        result_second = adapter.resolve_mailbox_role_by_id("some-id")
+
+        # Neither call should find a role.
+        assert result_first is None
+        assert result_second is None
+        # Mailbox/get must have been called ONCE, not twice.
+        assert len(transport.requests) == 1
