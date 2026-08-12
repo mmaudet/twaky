@@ -119,27 +119,60 @@ def test_park_for_review_lands_in_awaiting_user_with_artifact_and_reason():
 
 class TestLangfuseInstrumentation:
     def test_declare_emits_trace(self, monkeypatch):
-        """When langfuse creds are set, engine.declare should call the client."""
-        # Skip if not configured — we don't want CI to require creds.
-        if not (settings.langfuse_public_key and settings.langfuse_secret_key):
-            pytest.skip("langfuse not configured in this environment")
+        """engine.declare / start_planning / cancel must call the observability
+        client's ``start_as_current_span`` with the expected span names.
+
+        The previous version spy-patched ``real_client.start_as_current_span``
+        on an instance returned by ``obs.get_client()`` — but langfuse v3
+        ``get_client()`` returns a fresh disabled instance on every call
+        (confirmed empirically: ``obs.get_client() is obs.get_client()`` is
+        False). The spy was never triggered and, when the client was
+        disabled, ``start_as_current_span`` returned a no-op context manager
+        without invoking our spy either. Result: the test always failed on
+        environments where langfuse creds were present.
+
+        Fix: patch at the MODULE level — replace ``obs.get_client`` itself
+        with a stub returning a MagicMock. Every code path resolves the
+        client through ``obs.get_client()`` so every span call hits our
+        stub. Works regardless of whether real langfuse credentials are
+        configured — no external service, no network I/O.
+
+        See docs/superpowers/investigations/2026-08-10-nine-flakes.md
+        flake #2.
+        """
+        from unittest.mock import MagicMock
+
+        import twaky.observability as obs
 
         seen: list[str] = []
 
-        # Wrap the real Langfuse client to record start_as_current_span names.
-        import twaky.observability as obs
+        class _FakeSpan:
+            def __enter__(self):
+                return self
 
-        real_client = obs.get_client()
-        if real_client is None:
-            pytest.skip("langfuse client unavailable")
+            def __exit__(self, *args):
+                return False
 
-        orig_span = real_client.start_as_current_span
+            def update_trace(self, **kw):
+                pass
+
+            def update(self, **kw):
+                pass
+
+            def set_attribute(self, *a, **kw):
+                pass
 
         def _spy(name, **kw):
             seen.append(name)
-            return orig_span(name=name, **kw)
+            return _FakeSpan()
 
-        monkeypatch.setattr(real_client, "start_as_current_span", _spy)
+        fake_client = MagicMock()
+        fake_client.start_as_current_span = _spy
+
+        # Patch at module level so every ``obs.get_client()`` call returns
+        # our fake — this is the load-bearing change vs the old instance
+        # monkeypatch.
+        monkeypatch.setattr(obs, "get_client", lambda: fake_client)
 
         m = engine.declare(intent_text="X", owner_email="a@x", declared_by="a@x")
         engine.start_planning(m.id)

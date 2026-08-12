@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import socket
 import time
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import aio_pika
@@ -32,7 +34,29 @@ def _reachable() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(not _reachable(), reason="twaky-pg not reachable")
+def _rabbitmq_reachable() -> bool:
+    """Skip cleanly outside Docker — ``rabbitmq`` is a compose-internal name.
+
+    Attempts a 1-second DNS lookup on the AMQP host from ``settings.rabbitmq_url``.
+    Without this guard the test fails with a confusing AMQPConnectionError:
+    Temporary failure in name resolution when developers run pytest from
+    the host (RabbitMQ is only reachable from within twake-network).
+    """
+    try:
+        parsed = urlparse(settings.rabbitmq_url)
+        host = parsed.hostname or "rabbitmq"
+        port = parsed.port or 5672
+        socket.setdefaulttimeout(1)
+        socket.getaddrinfo(host, port)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _reachable() or not _rabbitmq_reachable(),
+    reason="twaky-pg or rabbitmq not reachable",
+)
 
 
 async def _publish_mail_received(mid: str, owner: str):

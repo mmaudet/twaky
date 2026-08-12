@@ -71,10 +71,16 @@ def test_mission_a_ends_awaiting_user():
     from twaky.daemon import atlas_daemon
     from twaky.missions import engine, repository
 
+    # Isolated owner_email (RFC 6761 .invalid TLD) — otherwise the live
+    # atlas daemon claims the mission via mission_declared NOTIFY before
+    # our patched _run_mission_sync fires, races through the real graph,
+    # and leaves the state at awaiting_user with wrong artifacts.
+    # See docs/superpowers/investigations/2026-08-10-nine-flakes.md flake #5.
+    _isolated_owner = "mission-a-test@test.invalid"
     m = engine.declare(
         intent_text="Draft a reply to demo-msg-1",
-        owner_email=settings.twaky_owner_email,
-        declared_by=settings.twaky_owner_email,
+        owner_email=_isolated_owner,
+        declared_by=_isolated_owner,
     )
 
     with (
@@ -99,8 +105,18 @@ def test_mission_a_ends_awaiting_user():
 
     got = repository.get(m.id)
     assert got.state.value == "awaiting_user"
-    kinds = [a.get("kind") for a in got.artifacts]
-    assert "approve_draft" in kinds
+    # ``kind`` in the fake payload maps to ``state_reason`` on the mission
+    # via ``engine.request_user_input(reason=pending.get("kind"), …)``.
+    # The artifact dict itself carries {draft, to, subject} — not a
+    # ``kind`` key. Previous assertion (``"approve_draft" in kinds``)
+    # only ever passed by accident when the live atlas daemon raced
+    # ahead of the test's patched graph and produced a different
+    # artifact shape. See flake #5 in
+    # docs/superpowers/investigations/2026-08-10-nine-flakes.md.
+    assert got.state_reason == "approve_draft"
+    assert any((a.get("draft") == "Hi Bob — thanks!") for a in got.artifacts), (
+        f"expected draft artifact, got {got.artifacts!r}"
+    )
     # Cleanup.
     with psycopg.connect(_dsn()) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM mission WHERE id = %s", (m.id,))

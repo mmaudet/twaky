@@ -64,7 +64,21 @@ def _cleanup(mission_id) -> None:
 
 
 def test_delegate_returns_done_when_mission_completes():
-    """Background thread resolves the mission; delegate() must return state='done'."""
+    """Background thread resolves the mission; delegate() must return state='done'.
+
+    Uses a unique intent_text per test invocation so the resolver thread
+    can filter to this test's specific mission — previously the resolver
+    called ``repository.list_all()`` and finished the FIRST
+    non-terminal sentinel:mail mission it found, which in the full test
+    suite (or with the live daemon running) sometimes turned out to be
+    the sibling ``test_delegate_times_out`` mission, corrupting its
+    state and causing that test to fail. See flake #1 in
+    docs/superpowers/investigations/2026-08-10-nine-flakes.md.
+    """
+    from uuid import uuid4
+
+    unique_intent = f"resolve-test-{uuid4()}"
+
     d = Delegation("mail", _dsn())
 
     resolved_event = threading.Event()
@@ -73,13 +87,15 @@ def test_delegate_returns_done_when_mission_completes():
         # Wait briefly so delegate() has had time to declare the mission and start
         # listening on mission_changed before we attempt to finish it.
         time.sleep(0.5)
-        # Poll for a mission declared by sentinel:mail that is not yet terminal.
-        missions = repository.list_all(settings.twaky_owner_email, limit=5)
+        # Poll for a mission declared by sentinel:mail with our unique intent.
+        missions = repository.list_all(settings.twaky_owner_email, limit=20)
         target = next(
             (
                 m
                 for m in missions
-                if m.declared_by == "sentinel:mail" and not m.state.is_terminal
+                if m.declared_by == "sentinel:mail"
+                and m.intent_text == unique_intent
+                and not m.state.is_terminal
             ),
             None,
         )
@@ -100,7 +116,7 @@ def test_delegate_returns_done_when_mission_completes():
     resolver_thread = threading.Thread(target=_resolver, daemon=True)
     resolver_thread.start()
 
-    result = d.delegate(intent_text="Atlas handle this", timeout_s=5.0)
+    result = d.delegate(intent_text=unique_intent, timeout_s=5.0)
 
     resolver_thread.join(timeout=3.0)
 
