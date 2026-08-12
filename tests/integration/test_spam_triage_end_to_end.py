@@ -88,7 +88,9 @@ _TEST_THREAD_ID = "spam-e2e-thread-001"
 
 
 @pytest.fixture(autouse=True)
-def _seed_and_restore_config(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+def _seed_and_restore_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[None, None, None]:
     """Seed spam_filter_enabled in the 'mail' sentinel config for the test duration.
 
     Uses direct Postgres UPDATE so the change is visible to the production pool.

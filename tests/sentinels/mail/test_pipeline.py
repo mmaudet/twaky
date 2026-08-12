@@ -91,7 +91,11 @@ def _make_email(
     }
 
 
-def _ctx(adapter: InMemoryMailAdapter, base: MagicMock | None = None, config_values: dict | None = None) -> NodeContext:
+def _ctx(
+    adapter: InMemoryMailAdapter,
+    base: MagicMock | None = None,
+    config_values: dict | None = None,
+) -> NodeContext:
     b = base if base is not None else MagicMock()
     b.sentinel_row.config_values = config_values or {}
     return NodeContext(base=b, mail=adapter, owner_email="me@x.com")
@@ -230,14 +234,24 @@ class TestPipelineSpamBucketEndsEarly:
             state = process_email(ctx, "e1")
 
         # Assert: spam_bucket is set, status is None (thread_status never ran)
-        assert state.get("spam_bucket") == "spam", f"Expected spam_bucket='spam', got {state.get('spam_bucket')}"
-        assert state.get("status") is None, f"Expected status=None, got {state.get('status')}"
+        assert state.get("spam_bucket") == "spam", (
+            f"Expected spam_bucket='spam', got {state.get('spam_bucket')}"
+        )
+        assert state.get("status") is None, (
+            f"Expected status=None, got {state.get('status')}"
+        )
         # Assert actions_applied was set by spam_triage (labeling, keyword)
         actions = state.get("actions_applied", [])
-        assert "label:__spam__" in actions, f"Expected 'label:__spam__' in actions, got {actions}"
-        assert "keyword:$junk" in actions, f"Expected 'keyword:$junk' in actions, got {actions}"
+        assert "label:__spam__" in actions, (
+            f"Expected 'label:__spam__' in actions, got {actions}"
+        )
+        assert "keyword:$junk" in actions, (
+            f"Expected 'keyword:$junk' in actions, got {actions}"
+        )
         # Assert email was labeled
-        assert "e1" in adapter._labels, f"Expected email e1 to be labeled, labels: {adapter._labels}"
+        assert "e1" in adapter._labels, (
+            f"Expected email e1 to be labeled, labels: {adapter._labels}"
+        )
         assert "__spam__" in adapter._labels["e1"]
         # Assert draft was not created
         assert state.get("draft") is None

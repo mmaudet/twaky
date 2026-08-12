@@ -105,7 +105,9 @@ class TestApplyActions:
         ctx = _ctx(mail=adapter)
         node = make_apply_actions(ctx)
 
-        result = node({"email_id": "e1", "rule_name": "multi-action", "thread": _thread("e1")})  # type: ignore[arg-type]
+        result = node(
+            {"email_id": "e1", "rule_name": "multi-action", "thread": _thread("e1")}
+        )  # type: ignore[arg-type]
 
         assert result["actions_applied"] == ["archive", "mark_read", "label:x"]
         assert "e1" in adapter._archived
@@ -123,7 +125,13 @@ class TestApplyActions:
         ctx = _ctx(emitter=emitter)
         node = make_apply_actions(ctx)
 
-        result = node({"email_id": "e1", "rule_name": "notify-rule", "thread": _thread("e1", subject="Hello")})  # type: ignore[arg-type]
+        result = node(
+            {
+                "email_id": "e1",
+                "rule_name": "notify-rule",
+                "thread": _thread("e1", subject="Hello"),
+            }
+        )  # type: ignore[arg-type]
 
         assert result["actions_applied"] == ["notify"]
         emitter.emit.assert_called_once()
@@ -142,7 +150,13 @@ class TestApplyActions:
         ctx = _ctx(delegation=delegation)
         node = make_apply_actions(ctx)
 
-        result = node({"email_id": "e1", "rule_name": "delegate-rule", "thread": _thread("e1", subject="Handle me")})  # type: ignore[arg-type]
+        result = node(
+            {
+                "email_id": "e1",
+                "rule_name": "delegate-rule",
+                "thread": _thread("e1", subject="Handle me"),
+            }
+        )  # type: ignore[arg-type]
 
         assert result["actions_applied"] == ["delegate_to_atlas"]
         delegation.delegate.assert_called_once()
@@ -161,7 +175,9 @@ class TestApplyActions:
         ctx = _ctx(mail=adapter)
         node = make_apply_actions(ctx)
 
-        result = node({"email_id": "e1", "rule_name": "draft-rule", "thread": _thread("e1")})  # type: ignore[arg-type]
+        result = node(
+            {"email_id": "e1", "rule_name": "draft-rule", "thread": _thread("e1")}
+        )  # type: ignore[arg-type]
 
         assert result["actions_applied"] == ["draft_reply"]
         assert adapter._drafts == []
@@ -179,7 +195,9 @@ class TestApplyActions:
         ctx = _ctx(mail=adapter)
         node = make_apply_actions(ctx)
 
-        result = node({"email_id": "e1", "rule_name": "disabled-rule", "thread": _thread("e1")})  # type: ignore[arg-type]
+        result = node(
+            {"email_id": "e1", "rule_name": "disabled-rule", "thread": _thread("e1")}
+        )  # type: ignore[arg-type]
 
         assert result["actions_applied"] == []
         assert "e1" not in adapter._archived
@@ -203,5 +221,7 @@ class TestApplyActions:
         """Rule not found in store → actions_applied=[]."""
         ctx = _ctx()
         node = make_apply_actions(ctx)
-        result = node({"email_id": "e1", "rule_name": "nonexistent-rule", "thread": _thread("e1")})  # type: ignore[arg-type]
+        result = node(
+            {"email_id": "e1", "rule_name": "nonexistent-rule", "thread": _thread("e1")}
+        )  # type: ignore[arg-type]
         assert result["actions_applied"] == []

@@ -110,9 +110,7 @@ def test_awaiting_reply_status_propagates(mock_context: NodeContext) -> None:
         reasoning="Waiting for sender to provide requested info.",
     )
 
-    with patch(
-        "twaky.sentinels.mail.nodes.structured_call", return_value=mock_output
-    ):
+    with patch("twaky.sentinels.mail.nodes.structured_call", return_value=mock_output):
         result = node(state)
         assert result == {"status": ThreadStatus.AWAITING_REPLY}
 
@@ -137,9 +135,7 @@ def test_actioned_status_propagates(mock_context: NodeContext) -> None:
         reasoning="Thread is complete.",
     )
 
-    with patch(
-        "twaky.sentinels.mail.nodes.structured_call", return_value=mock_output
-    ):
+    with patch("twaky.sentinels.mail.nodes.structured_call", return_value=mock_output):
         result = node(state)
         assert result == {"status": ThreadStatus.ACTIONED}
 
@@ -164,9 +160,7 @@ def test_fyi_status_propagates(mock_context: NodeContext) -> None:
         reasoning="Informational content, no action needed.",
     )
 
-    with patch(
-        "twaky.sentinels.mail.nodes.structured_call", return_value=mock_output
-    ):
+    with patch("twaky.sentinels.mail.nodes.structured_call", return_value=mock_output):
         result = node(state)
         assert result == {"status": ThreadStatus.FYI}
 
