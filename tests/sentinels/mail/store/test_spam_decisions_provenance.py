@@ -144,20 +144,32 @@ class TestProvenancePersistence:
         assert "envelope_headers" not in insert_sql
 
     def test_column_cache_not_refetched_on_second_call(self) -> None:
-        """_HAS_PROVENANCE_COLUMNS is cached — information_schema queried only once."""
+        """_HAS_PROVENANCE_COLUMNS is cached — information_schema queried only once.
+
+        The first insert() opens two connections: one for the information_schema
+        SELECT and one for the INSERT.  The second insert() must open exactly one
+        connection (INSERT only) because the column-existence result is already
+        cached.  If _detect_provenance_columns re-queried on every call the
+        second insert would open two connections, making the delta == 2.
+        """
         pool = _make_pool_mock(columns_exist=True)
 
         with patch(
             "twaky.sentinels.mail.store.spam_decisions.get_pool", return_value=pool
         ):
             store.insert(**_BASE_INSERT_KWARGS)
-            # Reset the mock's side_effect call count manually to track NEW calls.
-            initial_call_count = pool.connection.call_count
+            # Snapshot the connection count AFTER the first insert.
+            count_after_first = pool.connection.call_count
             store.insert(**_BASE_INSERT_KWARGS)
-            # Pool should have been used again (for the INSERT) but no info_schema re-check.
-            second_call_count = pool.connection.call_count
-            # Each insert after cache is set: only 1 DB call (INSERT, no schema check).
-            assert second_call_count > initial_call_count
+            count_after_second = pool.connection.call_count
+
+        # The second insert must have opened exactly 1 connection (INSERT only).
+        # If the schema check were repeated it would open 2, failing this assertion.
+        assert count_after_second - count_after_first == 1, (
+            f"Expected second insert to open exactly 1 connection (INSERT only), "
+            f"but it opened {count_after_second - count_after_first}. "
+            f"This suggests _detect_provenance_columns re-queried information_schema."
+        )
 
 
 class TestListRecentWithMissingColumns:
