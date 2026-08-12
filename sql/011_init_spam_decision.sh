@@ -49,7 +49,7 @@ EOSQL
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-twaky}" <<EOSQL
 
     UPDATE sentinel SET config_schema = jsonb_set(config_schema, '{properties,spam_filter_enabled}', '{"type":"boolean","default":false}'::jsonb, true) WHERE name='mail';
-    UPDATE sentinel SET config_schema = jsonb_set(config_schema, '{properties,spam_llm_confidence_threshold}', '{"type":"number","minimum":0,"maximum":1,"default":0.85}'::jsonb, true) WHERE name='mail';
+    UPDATE sentinel SET config_schema = jsonb_set(config_schema, '{properties,spam_llm_confidence_threshold}', '{"type":"number","minimum":0,"maximum":1,"default":0.70}'::jsonb, true) WHERE name='mail';
     UPDATE sentinel SET config_schema = jsonb_set(config_schema, '{properties,spam_llm_newsletter_threshold}', '{"type":"number","minimum":0,"maximum":1,"default":0.70}'::jsonb, true) WHERE name='mail';
     UPDATE sentinel SET config_schema = jsonb_set(config_schema, '{properties,spam_purge_active_days}', '{"type":"integer","minimum":1,"default":30}'::jsonb, true) WHERE name='mail';
     UPDATE sentinel SET config_schema = jsonb_set(config_schema, '{properties,spam_purge_restored_days}', '{"type":"integer","minimum":1,"default":90}'::jsonb, true) WHERE name='mail';
