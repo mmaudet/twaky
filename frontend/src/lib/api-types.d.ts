@@ -581,6 +581,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mail-sentinel/rules/propose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Rule
+         * @description Simulate a proposed rule against historical spam decisions.
+         *
+         *     Returns a preview of how many recent decisions would have matched the
+         *     proposed rule, which existing rules would shadow it, and up to 10 example
+         *     rows — without persisting anything.
+         */
+        post: operations["propose_rule_mail_sentinel_rules_propose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mail-sentinel/auth": {
         parameters: {
             query?: never;
@@ -709,6 +733,31 @@ export interface paths {
          *     ``restored``, and ``total_processed`` buckets.
          */
         get: operations["get_stats_mail_sentinel_spam_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mail-sentinel/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Mail Runs
+         * @description List the N most recent mail-pipeline runs, newest first.
+         *
+         *     Each row includes the base ``sentinel_run`` fields plus the linked
+         *     ``mail_sentinel_spam_decision`` (bucket + signal_source) when the
+         *     ``spam_triage`` node classified this email. Uses the ``event_ref``
+         *     on the run (which is the JMAP email id) as the join key.
+         */
+        get: operations["list_mail_runs_mail_sentinel_runs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -987,6 +1036,59 @@ export interface components {
             run_on_threads?: boolean | null;
         };
         /**
+         * MailRuleProposeRequest
+         * @description Payload for POST /mail-sentinel/rules/propose.
+         */
+        MailRuleProposeRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Priority
+             * @default 100
+             */
+            priority: number;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Conditions
+             * @default []
+             */
+            conditions: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Combinator
+             * @default OR
+             */
+            combinator: string;
+            /** Actions */
+            actions: string[];
+            window?: components["schemas"]["ProposeWindow"];
+        };
+        /**
+         * MailRuleProposeResponse
+         * @description Response shape for POST /mail-sentinel/rules/propose.
+         */
+        MailRuleProposeResponse: {
+            /** Valid */
+            valid: boolean;
+            /** Matched Count */
+            matched_count: number;
+            /** Would Shadow Count */
+            would_shadow_count: number;
+            /** Matched Examples */
+            matched_examples: components["schemas"]["MatchedExample"][];
+            /** Would Shadow */
+            would_shadow: string[];
+            /** Simulation Partial */
+            simulation_partial: boolean;
+            /** Simulation Partial Reason */
+            simulation_partial_reason: string | null;
+        };
+        /**
          * MailRuleSummary
          * @description Shallow representation used in the rules list endpoint.
          */
@@ -1010,6 +1112,58 @@ export interface components {
             action_count: number;
             /** Condition Count */
             condition_count: number;
+        };
+        /**
+         * MailSentinelRun
+         * @description One mail_sentinel run row + resolved spam decision (if any).
+         */
+        MailSentinelRun: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Email Id */
+            email_id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Completed At */
+            completed_at: string | null;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /** Outcome */
+            outcome: string;
+            /** Mission Id */
+            mission_id: string | null;
+            /** Llm Calls */
+            llm_calls: number;
+            /** Error Repr */
+            error_repr: string | null;
+            /** Spam Bucket */
+            spam_bucket: string | null;
+            /** Spam Signal Source */
+            spam_signal_source: string | null;
+            /** Spam Decision Id */
+            spam_decision_id: string | null;
+        };
+        /**
+         * MatchedExample
+         * @description A single matched example row in the propose response.
+         */
+        MatchedExample: {
+            /** Decision Id */
+            decision_id: string;
+            /** Sender */
+            sender: string;
+            /** Subject */
+            subject: string;
+            /** Current Bucket */
+            current_bucket: string;
+            /** Would Shadow By */
+            would_shadow_by: string | null;
         };
         /** Mission */
         Mission: {
@@ -1075,6 +1229,22 @@ export interface components {
              * @enum {string}
              */
             status: "pending" | "in_progress" | "done" | "skipped";
+        };
+        /**
+         * ProposeWindow
+         * @description Window specification for the propose endpoint.
+         */
+        ProposeWindow: {
+            /**
+             * Kind
+             * @default recent
+             */
+            kind: string;
+            /**
+             * Count
+             * @default 200
+             */
+            count: number;
         };
         /** ResumeBody */
         ResumeBody: {
@@ -2525,6 +2695,39 @@ export interface operations {
             };
         };
     };
+    propose_rule_mail_sentinel_rules_propose_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailRuleProposeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailRuleProposeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_auth_status_mail_sentinel_auth_get: {
         parameters: {
             query?: never;
@@ -2665,6 +2868,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpamStats"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mail_runs_mail_sentinel_runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                before?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSentinelRun"][];
                 };
             };
             /** @description Validation Error */

@@ -18,14 +18,17 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { RuleJsonEditor, validateRule } from '@/components/sentinels/rule-json-editor'
+import { ProposeResults } from '@/components/sentinels/propose-results'
 import {
     useMailRule,
     useCreateMailRule,
     usePatchMailRule,
     useDeleteMailRule,
+    useProposeMailRule,
     type MailRuleCreate,
     type MailRulePatch,
 } from '@/hooks/use-mail-sentinel-rules'
+import type { components } from '@/lib/api-types'
 
 const DEFAULT_RULE = JSON.stringify(
     {
@@ -91,13 +94,19 @@ export default function RuleEditorPage() {
     const create = useCreateMailRule()
     const patch = usePatchMailRule(id)
     const del = useDeleteMailRule()
+    const propose = useProposeMailRule()
 
     // We derive the editor JSON from the fetched rule once it arrives.
     // Track which rule ID we last initialised from to avoid re-setting on every render.
     const [loadedRuleId, setLoadedRuleId] = useState<string | null>(null)
     const [json, setJson] = useState<string>(DEFAULT_RULE)
     const [isValid, setIsValid] = useState(() => validateRule(DEFAULT_RULE).isValid)
-    const [isDirty, setIsDirty] = useState(false)
+
+    // Propose/Apply flow state
+    const [proposeResult, setProposeResult] = useState<components['schemas']['MailRuleProposeResponse'] | null>(null)
+    // The JSON that was in the editor when Propose last ran; used to detect drift
+    const [proposeAppliesToJson, setProposeAppliesToJson] = useState<string | null>(null)
+    const [reviewed, setReviewed] = useState(false)
 
     // Derive updated json when the rule loads for the first time.
     // This is intentionally a synchronous "derived state during render" pattern,
@@ -107,19 +116,49 @@ export default function RuleEditorPage() {
         setLoadedRuleId(existingRule.id)
         setJson(ruleJson)
         setIsValid(validateRule(ruleJson).isValid)
-        setIsDirty(false)
     }
+
+    // If the current JSON has drifted from when Propose last ran, invalidate
+    const proposeResultValid =
+        proposeResult !== null && proposeAppliesToJson === json
 
     const handleChange = useCallback(
         (value: string, meta: { isValid: boolean; errors: string[] }) => {
             setJson(value)
             setIsValid(meta.isValid)
-            setIsDirty(true)
         },
         [],
     )
 
-    async function handleSave() {
+    async function handlePropose() {
+        let parsed: MailRuleCreate
+        try {
+            parsed = JSON.parse(json) as MailRuleCreate
+        } catch {
+            toast.error('JSON is not valid')
+            return
+        }
+
+        try {
+            const body: components['schemas']['MailRuleProposeRequest'] = {
+                name: parsed.name,
+                priority: parsed.priority,
+                enabled: parsed.enabled,
+                conditions: parsed.conditions,
+                combinator: parsed.combinator,
+                actions: parsed.actions,
+                window: { kind: 'recent', count: 200 },
+            }
+            const result = await propose.mutateAsync(body)
+            setProposeResult(result)
+            setProposeAppliesToJson(json)
+            setReviewed(false)
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : 'Propose failed')
+        }
+    }
+
+    async function handleApply() {
         let parsed: MailRuleCreate
         try {
             parsed = JSON.parse(json) as MailRuleCreate
@@ -146,7 +185,6 @@ export default function RuleEditorPage() {
                 }
                 await patch.mutateAsync(patchBody)
                 toast.success('Rule saved')
-                setIsDirty(false)
             }
         } catch (e) {
             toast.error(e instanceof Error ? e.message : 'Save failed')
@@ -163,9 +201,8 @@ export default function RuleEditorPage() {
         }
     }
 
-    const isSaving = create.isPending || patch.isPending
-    // For new rules, allow saving as soon as JSON is valid (even without dirty flag)
-    const saveDisabled = !isValid || (!isDirty && !isNew) || isSaving
+    const isApplying = create.isPending || patch.isPending
+    const previewDisabled = !isValid || propose.isPending
 
     if (isLoading) return <div className="p-8 text-muted-foreground">Loading…</div>
 
@@ -194,7 +231,7 @@ export default function RuleEditorPage() {
                     <RuleJsonEditor
                         value={json}
                         onChange={handleChange}
-                        disabled={isSaving}
+                        disabled={isApplying}
                     />
                 </div>
 
@@ -246,6 +283,15 @@ export default function RuleEditorPage() {
                 </div>
             </div>
 
+            {/* ProposeResults panel — shown only when a valid propose result exists */}
+            {proposeResultValid && proposeResult && (
+                <ProposeResults
+                    data={proposeResult}
+                    reviewed={reviewed}
+                    onReviewedChange={setReviewed}
+                />
+            )}
+
             {/* Bottom bar */}
             <div className="flex items-center justify-between border-t pt-4">
                 <div className="flex items-center gap-2">
@@ -278,9 +324,23 @@ export default function RuleEditorPage() {
                         </AlertDialog>
                     )}
                 </div>
-                <Button onClick={handleSave} disabled={saveDisabled}>
-                    {isSaving ? 'Saving…' : 'Save rule'}
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Button
+                        onClick={handlePropose}
+                        disabled={previewDisabled}
+                        variant="outline"
+                    >
+                        {propose.isPending ? 'Previewing…' : 'Preview matches'}
+                    </Button>
+                    {proposeResultValid && (
+                        <Button
+                            onClick={handleApply}
+                            disabled={!reviewed || isApplying}
+                        >
+                            {isApplying ? 'Saving…' : 'Apply rule'}
+                        </Button>
+                    )}
+                </div>
             </div>
         </div>
     )

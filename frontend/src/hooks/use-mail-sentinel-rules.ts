@@ -7,6 +7,8 @@ export type MailRuleSummary = components['schemas']['MailRuleSummary']
 export type MailRuleDetail = components['schemas']['MailRuleDetail']
 export type MailRuleCreate = components['schemas']['MailRuleCreate']
 export type MailRulePatch = components['schemas']['MailRulePatch']
+export type MailRuleProposeRequest = components['schemas']['MailRuleProposeRequest']
+export type MailRuleProposeResponse = components['schemas']['MailRuleProposeResponse']
 
 function toApiError(error: unknown): ApiError {
     return new ApiError(
@@ -87,5 +89,20 @@ export function useDeleteMailRule() {
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['mail-rules'] })
         },
+    })
+}
+
+export function useProposeMailRule() {
+    return useMutation<
+        components['schemas']['MailRuleProposeResponse'],
+        Error,
+        components['schemas']['MailRuleProposeRequest']
+    >({
+        mutationFn: async (body) => {
+            const { data, error } = await api.POST('/mail-sentinel/rules/propose', { body })
+            if (error) throw toApiError(error)
+            return data!
+        },
+        retry: false,
     })
 }
