@@ -87,6 +87,23 @@ describe('ProposeResults', () => {
         expect(alert.textContent).toContain('Only 100 of 2000 rows scanned')
     })
 
+    it('renders partial alert with fallback when reason is null', () => {
+        render(
+            <ProposeResults
+                data={makeResponse({
+                    simulation_partial: true,
+                    simulation_partial_reason: null,
+                })}
+                reviewed={false}
+                onReviewedChange={vi.fn()}
+            />,
+        )
+
+        const alert = screen.getByRole('alert')
+        expect(alert).toBeTruthy()
+        expect(alert.textContent).toContain('Simulation partial (no details provided)')
+    })
+
     it('does not render Simulation partial alert when flag false', () => {
         render(
             <ProposeResults

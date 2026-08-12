@@ -30,13 +30,13 @@ export function ProposeResults({ data, reviewed, onReviewedChange }: ProposeResu
             </p>
 
             {/* Simulation partial warning */}
-            {data.simulation_partial && data.simulation_partial_reason && (
+            {data.simulation_partial === true && (
                 <div
                     role="alert"
                     className="rounded-md border border-yellow-400 bg-yellow-50 px-3 py-2 text-sm text-yellow-800"
                 >
                     <span className="font-semibold">Partial simulation: </span>
-                    {data.simulation_partial_reason}
+                    {data.simulation_partial_reason || 'Simulation partial (no details provided)'}
                 </div>
             )}
 
