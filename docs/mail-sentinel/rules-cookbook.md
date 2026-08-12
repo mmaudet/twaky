@@ -104,6 +104,37 @@ VALUES (
 - **Do not** add `archive` to a `label:` rule "just in case". Archive
   is terminal — later rules never fire.
 
+## Testing a rule before Apply (SP6d)
+
+Since SP6d, the UI (and the `POST /mail-sentinel/rules/propose`
+endpoint) simulates a proposed rule against the last 200 historical
+spam decisions before letting the operator commit it.
+
+The simulation is your safety net. It answers:
+
+- **How many mails would this rule affect?** — `matched_count`.
+- **Would any of them already be handled by a higher-priority
+  rule?** — `would_shadow_count` and `would_shadow` list the rules
+  that would fire first.
+- **Is the simulation trustworthy?** — `simulation_partial: true`
+  fires when the rule uses `header:*` predicates and some
+  decisions in the window pre-date the SP6d capture (their
+  `envelope_headers` are NULL). It also fires when the rule uses
+  `field: body` — the simulation intentionally does not fetch
+  bodies from JMAP.
+
+Rule of thumb: don't Apply a rule that returns `matched_count:
+0` unless you know the decisions in the window are stale for a
+reason (recent classifier tuning, deliberate warmup window). A
+zero-match rule is almost always a bug: a wrong operator, an
+overly narrow regex, or a rule targeting a header the simulation
+cannot see.
+
+When `would_shadow_count > 0`, decide explicitly: either raise
+the new rule's priority so it runs first, OR accept the shadowing
+(sometimes intentional — a broad archive rule shadowing a narrow
+label rule is fine if you want the archive).
+
 ## Inspecting live state
 
 ```bash
