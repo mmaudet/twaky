@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
     Table,
     TableBody,
@@ -29,6 +30,47 @@ import {
     useRestoreSpam,
     type SpamDecision,
 } from '@/hooks/use-mail-sentinel-spam'
+
+// ── Known mailbox roles ───────────────────────────────────────────────────────
+
+const KNOWN_ROLES = new Set([
+    'inbox',
+    'newsletter',
+    'archive',
+    'drafts',
+    'sent',
+    'trash',
+    'junk',
+])
+
+// ── OriginCell ────────────────────────────────────────────────────────────────
+
+function OriginCell({
+    role,
+    id,
+}: {
+    role: string | null | undefined
+    id: string | null | undefined
+}) {
+    if (role && KNOWN_ROLES.has(role)) {
+        return <Badge variant="secondary">{role}</Badge>
+    }
+    if ((!role || !KNOWN_ROLES.has(role)) && id) {
+        return (
+            <code title={id}>
+                {id.slice(0, 8)}&hellip;
+            </code>
+        )
+    }
+    return (
+        <span
+            className="text-muted-foreground"
+            title="Provenance not captured (decision predates SP6d capture or migration pending)"
+        >
+            &mdash;
+        </span>
+    )
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -121,7 +163,7 @@ export function RecentSpamTab() {
     const {
         data: decisions,
         isLoading: decisionsLoading,
-    } = useSpamDecisions({ limit: 50, before: cursorBefore })
+    } = useSpamDecisions({ limit: 50, before: cursorBefore, withProvenance: true })
 
     // ── Toggle handler ────────────────────────────────────────────────────────
 
@@ -215,6 +257,7 @@ export function RecentSpamTab() {
                                 <TableHead>From</TableHead>
                                 <TableHead>Subject</TableHead>
                                 <TableHead>Received</TableHead>
+                                <TableHead>Origin</TableHead>
                                 <TableHead>Signal</TableHead>
                                 <TableHead>Actions</TableHead>
                             </TableRow>
@@ -236,6 +279,12 @@ export function RecentSpamTab() {
                                     </TableCell>
                                     <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                                         {formatRelative(decision.received_at)}
+                                    </TableCell>
+                                    <TableCell className="text-sm">
+                                        <OriginCell
+                                            role={decision.origin_mailbox_role}
+                                            id={decision.origin_mailbox_id}
+                                        />
                                     </TableCell>
                                     <TableCell className="text-sm">
                                         <span title={decision.signal_source}>

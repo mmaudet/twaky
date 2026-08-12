@@ -77,6 +77,8 @@ const SAMPLE_DECISIONS = [
         restored_at: null,
         restored_by: null,
         decided_at: new Date(Date.now() - 30_000).toISOString(),
+        origin_mailbox_id: null,
+        origin_mailbox_role: null,
     },
     {
         id: 'aaaaaaaa-0000-0000-0000-000000000002',
@@ -92,6 +94,8 @@ const SAMPLE_DECISIONS = [
         restored_at: null,
         restored_by: null,
         decided_at: new Date(Date.now() - 90_000).toISOString(),
+        origin_mailbox_id: null,
+        origin_mailbox_role: null,
     },
 ]
 
@@ -267,5 +271,117 @@ describe('RecentSpamTab', () => {
         expect(mockRestoreMutate).toHaveBeenCalledWith(
             'aaaaaaaa-0000-0000-0000-000000000001',
         )
+    })
+
+    // ── Origin column ─────────────────────────────────────────────────────────
+
+    it('test_origin_renders_badge_when_role_is_known', () => {
+        mockUseSentinel.mockReturnValue({
+            data: SENTINEL_ON,
+            isLoading: false,
+            error: null,
+        } as unknown as ReturnType<typeof useSentinel>)
+
+        mockUseSpamDecisions.mockReturnValue({
+            data: [
+                {
+                    ...SAMPLE_DECISIONS[0],
+                    origin_mailbox_role: 'inbox',
+                    origin_mailbox_id: 'mbox-abc12345',
+                },
+            ],
+            isLoading: false,
+            error: null,
+        } as unknown as ReturnType<typeof useSpamDecisions>)
+
+        render(<RecentSpamTab />)
+
+        // Badge with role text should be visible
+        expect(screen.getByText('inbox')).toBeTruthy()
+    })
+
+    it('test_origin_renders_truncated_code_when_role_null_but_id_present', () => {
+        mockUseSentinel.mockReturnValue({
+            data: SENTINEL_ON,
+            isLoading: false,
+            error: null,
+        } as unknown as ReturnType<typeof useSentinel>)
+
+        mockUseSpamDecisions.mockReturnValue({
+            data: [
+                {
+                    ...SAMPLE_DECISIONS[0],
+                    origin_mailbox_role: null,
+                    origin_mailbox_id: 'abcdef1234567890',
+                },
+            ],
+            isLoading: false,
+            error: null,
+        } as unknown as ReturnType<typeof useSpamDecisions>)
+
+        render(<RecentSpamTab />)
+
+        // Code element with truncated id (first 8 chars + ellipsis)
+        const codeEl = document.querySelector('code')
+        expect(codeEl).toBeTruthy()
+        expect(codeEl!.title).toBe('abcdef1234567890')
+        expect(codeEl!.textContent).toContain('abcdef12')
+    })
+
+    it('test_origin_renders_emdash_tooltip_when_both_null', () => {
+        mockUseSentinel.mockReturnValue({
+            data: SENTINEL_ON,
+            isLoading: false,
+            error: null,
+        } as unknown as ReturnType<typeof useSentinel>)
+
+        mockUseSpamDecisions.mockReturnValue({
+            data: [
+                {
+                    ...SAMPLE_DECISIONS[0],
+                    origin_mailbox_role: null,
+                    origin_mailbox_id: null,
+                },
+            ],
+            isLoading: false,
+            error: null,
+        } as unknown as ReturnType<typeof useSpamDecisions>)
+
+        render(<RecentSpamTab />)
+
+        // Em-dash span with tooltip
+        const emdash = screen.getByTitle(
+            'Provenance not captured (decision predates SP6d capture or migration pending)',
+        )
+        expect(emdash).toBeTruthy()
+        expect(emdash.textContent).toContain('—')
+    })
+
+    it('test_origin_column_renders_code_slice_when_role_is_unknown_but_id_present', () => {
+        mockUseSentinel.mockReturnValue({
+            data: SENTINEL_ON,
+            isLoading: false,
+            error: null,
+        } as unknown as ReturnType<typeof useSentinel>)
+
+        mockUseSpamDecisions.mockReturnValue({
+            data: [
+                {
+                    ...SAMPLE_DECISIONS[0],
+                    origin_mailbox_role: 'custom-folder',
+                    origin_mailbox_id: 'abc123def456',
+                },
+            ],
+            isLoading: false,
+            error: null,
+        } as unknown as ReturnType<typeof useSpamDecisions>)
+
+        render(<RecentSpamTab />)
+
+        // Code element with truncated id (first 8 chars + ellipsis)
+        const codeEl = document.querySelector('code')
+        expect(codeEl).toBeTruthy()
+        expect(codeEl!.title).toBe('abc123def456')
+        expect(codeEl!.textContent).toContain('abc123de')
     })
 })

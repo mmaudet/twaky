@@ -1027,6 +1027,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/rules/propose:
+    post:
+      tags:
+      - mail-sentinel
+      summary: Propose Rule
+      description: 'Simulate a proposed rule against historical spam decisions.
+
+
+        Returns a preview of how many recent decisions would have matched the
+
+        proposed rule, which existing rules would shadow it, and up to 10 example
+
+        rows — without persisting anything.'
+      operationId: propose_rule_mail_sentinel_rules_propose_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailRuleProposeRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailRuleProposeResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /mail-sentinel/auth:
     get:
       tags:
@@ -1099,7 +1132,12 @@ paths:
 
         ``phishing-alert``) and/or cursor ``before`` (ISO-8601 datetime).
 
-        ``limit`` is bounded 1..500, defaulting to 50.'
+        ``limit`` is bounded 1..500, defaulting to 50.
+
+
+        Pass ``with_provenance=true`` to populate ``origin_mailbox_id`` and
+
+        ``origin_mailbox_role`` fields (omitted by default for backward compat).'
       operationId: list_spam_mail_sentinel_spam_get
       parameters:
       - name: bucket
@@ -1128,6 +1166,13 @@ paths:
             format: date-time
           - type: 'null'
           title: Before
+      - name: with_provenance
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: With Provenance
       responses:
         '200':
           description: Successful Response
@@ -1704,6 +1749,86 @@ components:
       type: object
       title: MailRulePatch
       description: Partial update payload for PATCH /mail-sentinel/rules/{id}.
+    MailRuleProposeRequest:
+      properties:
+        name:
+          type: string
+          title: Name
+        priority:
+          type: integer
+          maximum: 100.0
+          minimum: 1.0
+          title: Priority
+          default: 100
+        enabled:
+          type: boolean
+          title: Enabled
+          default: true
+        conditions:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Conditions
+          default: []
+        combinator:
+          type: string
+          title: Combinator
+          default: OR
+        actions:
+          items:
+            type: string
+          type: array
+          title: Actions
+        window:
+          $ref: '#/components/schemas/ProposeWindow'
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - actions
+      title: MailRuleProposeRequest
+      description: Payload for POST /mail-sentinel/rules/propose.
+    MailRuleProposeResponse:
+      properties:
+        valid:
+          type: boolean
+          title: Valid
+        matched_count:
+          type: integer
+          title: Matched Count
+        would_shadow_count:
+          type: integer
+          title: Would Shadow Count
+        matched_examples:
+          items:
+            $ref: '#/components/schemas/MatchedExample'
+          type: array
+          title: Matched Examples
+        would_shadow:
+          items:
+            type: string
+          type: array
+          title: Would Shadow
+        simulation_partial:
+          type: boolean
+          title: Simulation Partial
+        simulation_partial_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Simulation Partial Reason
+      type: object
+      required:
+      - valid
+      - matched_count
+      - would_shadow_count
+      - matched_examples
+      - would_shadow
+      - simulation_partial
+      - simulation_partial_reason
+      title: MailRuleProposeResponse
+      description: Response shape for POST /mail-sentinel/rules/propose.
     MailRuleSummary:
       properties:
         id:
@@ -1817,6 +1942,34 @@ components:
       - spam_decision_id
       title: MailSentinelRun
       description: One mail_sentinel run row + resolved spam decision (if any).
+    MatchedExample:
+      properties:
+        decision_id:
+          type: string
+          title: Decision Id
+        sender:
+          type: string
+          title: Sender
+        subject:
+          type: string
+          title: Subject
+        current_bucket:
+          type: string
+          title: Current Bucket
+        would_shadow_by:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Would Shadow By
+      type: object
+      required:
+      - decision_id
+      - sender
+      - subject
+      - current_bucket
+      - would_shadow_by
+      title: MatchedExample
+      description: A single matched example row in the propose response.
     Mission:
       properties:
         id:
@@ -1925,6 +2078,21 @@ components:
       - agent
       - tool
       title: PlanStep
+    ProposeWindow:
+      properties:
+        kind:
+          type: string
+          title: Kind
+          default: recent
+        count:
+          type: integer
+          minimum: 1.0
+          title: Count
+          default: 200
+      additionalProperties: false
+      type: object
+      title: ProposeWindow
+      description: Window specification for the propose endpoint.
     ResumeBody:
       properties:
         user_response:
@@ -2447,6 +2615,16 @@ components:
           type: string
           format: date-time
           title: Decided At
+        origin_mailbox_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Origin Mailbox Id
+        origin_mailbox_role:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Origin Mailbox Role
       additionalProperties: false
       type: object
       required:

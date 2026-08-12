@@ -7,8 +7,9 @@ All routes are protected by the ``require_owner`` dependency.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query
 from starlette.responses import Response
@@ -21,12 +22,17 @@ from twaky.api.schemas.mail_sentinel import (
     MailRuleCreate,
     MailRuleDetail,
     MailRulePatch,
+    MailRuleProposeRequest,
+    MailRuleProposeResponse,
     MailRuleSummary,
+    MatchedExample,
 )
+from twaky.sentinels.mail.nodes import rule_matches_static
 from twaky.sentinels.mail.store import learned_patterns as lp_store
 from twaky.sentinels.mail.store import memories as mem_store
 from twaky.sentinels.mail.store import rules as rules_store
-from twaky.sentinels.mail.store.rules import RuleValidationError
+from twaky.sentinels.mail.store import spam_decisions
+from twaky.sentinels.mail.store.rules import MailRule, RuleValidationError
 
 router = APIRouter(prefix="/mail-sentinel", tags=["mail-sentinel"])
 
@@ -279,6 +285,213 @@ def forget_pattern(
     """Forget a learned pattern. Silently succeeds even if the row does not exist."""
     lp_store.forget(sender_email, rule_name)
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# 9. POST /mail-sentinel/rules/propose  (SP6d)
+# ---------------------------------------------------------------------------
+
+_MAX_PROPOSE_COUNT = 2000
+_MAX_EXAMPLES = 10
+
+
+def _conditions_use_header_field(conditions: list[dict]) -> bool:
+    """Return True if any condition in *conditions* targets a ``header:*`` field."""
+    return any(c.get("field", "").startswith("header:") for c in conditions)
+
+
+def _conditions_use_body_field(conditions: list[dict]) -> bool:
+    """Return True if any condition in *conditions* targets the ``body`` field."""
+    return any(c.get("field", "") == "body" for c in conditions)
+
+
+def _build_jmap_envelope_from_decision(decision) -> dict:
+    """Build a minimal JMAP-like email dict from a SpamDecision for rule matching.
+
+    ``rule_matches_static`` (and its helpers) expect a JMAP email dict with
+    ``from`` as a list of ``{"email": ..., "name": ...}`` dicts, ``subject`` as
+    a string, and ``headers`` as a list of ``{"name": ..., "value": ...}``
+    dicts.  Body-related fields are intentionally empty — the simulation
+    does not fetch email bodies from JMAP.
+    """
+    jmap_from = [{"email": decision.sender_email, "name": ""}]
+
+    jmap_headers = []
+    if decision.envelope_headers:
+        for name, value in decision.envelope_headers.items():
+            jmap_headers.append({"name": name, "value": value})
+
+    return {
+        "from": jmap_from,
+        "subject": decision.subject or "",
+        "headers": jmap_headers,
+        # Body fields are empty — simulation limitation.
+        "to": [],
+        "bodyValues": {},
+        "textBody": [],
+        "preview": "",
+    }
+
+
+@router.post("/rules/propose", response_model=MailRuleProposeResponse)
+def propose_rule(
+    body: MailRuleProposeRequest,
+    _email: str = Depends(require_owner),
+):
+    """Simulate a proposed rule against historical spam decisions.
+
+    Returns a preview of how many recent decisions would have matched the
+    proposed rule, which existing rules would shadow it, and up to 10 example
+    rows — without persisting anything.
+    """
+    # ------------------------------------------------------------------
+    # 1. Validate the rule via the same store validators the create
+    #    endpoint uses (name, conditions, actions, combinator).
+    # ------------------------------------------------------------------
+    try:
+        rules_store.validate_name(body.name)
+        rules_store.validate_conditions(body.conditions)
+        rules_store.validate_actions(body.actions)
+        if body.combinator not in ("OR", "AND"):
+            raise RuleValidationError(
+                f"combinator must be 'OR' or 'AND', got {body.combinator!r}"
+            )
+    except RuleValidationError as exc:
+        return error_response(
+            code="validation_failed",
+            message=str(exc),
+            status_code=422,
+        )
+
+    # ------------------------------------------------------------------
+    # 2. Reject window.count > MAX_PROPOSE_COUNT.
+    # ------------------------------------------------------------------
+    count = body.window.count
+    if count > _MAX_PROPOSE_COUNT:
+        return error_response(
+            code="validation_failed",
+            message=(
+                f"window.count {count} exceeds the maximum allowed value of "
+                f"{_MAX_PROPOSE_COUNT}; reduce it and retry"
+            ),
+            status_code=422,
+        )
+
+    # ------------------------------------------------------------------
+    # 3. Load historical decisions.
+    # ------------------------------------------------------------------
+    decisions = spam_decisions.list_recent(bucket=None, limit=count)
+
+    # ------------------------------------------------------------------
+    # 4. Load earlier-priority enabled rules (priority < proposed priority).
+    # ------------------------------------------------------------------
+    all_enabled_rules = rules_store.list_all(enabled_only=True)
+    earlier_rules = [r for r in all_enabled_rules if r.priority < body.priority]
+
+    # ------------------------------------------------------------------
+    # 5. Build a synthetic MailRule for the proposed rule so we can
+    #    pass it directly to rule_matches_static.
+    # ------------------------------------------------------------------
+    _now = datetime.now(UTC)
+    proposed_rule = MailRule(
+        id=uuid4(),
+        name=body.name,
+        description="",
+        conditions=body.conditions,
+        combinator=body.combinator,
+        actions=body.actions,
+        priority=body.priority,
+        enabled=body.enabled,
+        run_on_threads=True,
+        created_at=_now,
+        updated_at=_now,
+    )
+
+    # Pre-compute which field types the proposed rule uses.
+    proposed_uses_header = _conditions_use_header_field(body.conditions)
+    proposed_uses_body = _conditions_use_body_field(body.conditions)
+
+    # ------------------------------------------------------------------
+    # 6. Replay the proposed rule against each historical decision.
+    # ------------------------------------------------------------------
+    matched_count = 0
+    would_shadow_count = 0
+    matched_examples: list[MatchedExample] = []
+    would_shadow_set: set[str] = set()
+
+    # Partial-reason tracking (using a set to deduplicate).
+    partial_reasons: set[str] = set()
+
+    for decision in decisions:
+        null_headers = decision.envelope_headers is None
+        jmap_envelope = _build_jmap_envelope_from_decision(decision)
+
+        # When the proposed rule uses a header field, flag partial whenever we
+        # evaluate it against a decision whose headers were not captured — the
+        # null headers may have prevented a match that would otherwise have
+        # fired, making the simulation unreliable for that row.
+        if proposed_uses_header and null_headers:
+            partial_reasons.add("header rules not evaluated")
+
+        # Body fields are always evaluated against empty body/preview in the
+        # simulation (we do not fetch email bodies from JMAP).
+        if proposed_uses_body:
+            partial_reasons.add("body predicate not evaluated")
+
+        verdict = rule_matches_static(jmap_envelope, proposed_rule)
+        if verdict is not True:
+            continue
+
+        # This decision matched the proposed rule.
+        matched_count += 1
+
+        # Check whether any earlier-priority rule would shadow this match.
+        shadow_rule_name: str | None = None
+        for earlier in earlier_rules:
+            earlier_verdict = rule_matches_static(jmap_envelope, earlier)
+            if earlier_verdict is True:
+                shadow_rule_name = earlier.name
+                would_shadow_set.add(earlier.name)
+                # Accumulate partial reasons for shadow rules that DID fire on a
+                # matched decision — per finding #2 (do not over-trigger for
+                # earlier rules that never matched any decision).
+                if _conditions_use_header_field(earlier.conditions) and null_headers:
+                    partial_reasons.add("header rules not evaluated")
+                if _conditions_use_body_field(earlier.conditions):
+                    partial_reasons.add("body predicate not evaluated")
+                break
+
+        if shadow_rule_name is not None:
+            would_shadow_count += 1
+
+        if len(matched_examples) < _MAX_EXAMPLES:
+            matched_examples.append(
+                MatchedExample(
+                    decision_id=str(decision.id),
+                    sender=decision.sender_email,
+                    subject=decision.subject or "",
+                    current_bucket=decision.bucket,
+                    would_shadow_by=shadow_rule_name,
+                )
+            )
+
+    # ------------------------------------------------------------------
+    # 7. Compute simulation_partial and reason string.
+    # ------------------------------------------------------------------
+    simulation_partial = len(partial_reasons) > 0
+    simulation_partial_reason: str | None = None
+    if simulation_partial:
+        simulation_partial_reason = "; ".join(sorted(partial_reasons))
+
+    return MailRuleProposeResponse(
+        valid=True,
+        matched_count=matched_count,
+        would_shadow_count=would_shadow_count,
+        matched_examples=matched_examples,
+        would_shadow=sorted(would_shadow_set),
+        simulation_partial=simulation_partial,
+        simulation_partial_reason=simulation_partial_reason,
+    )
 
 
 __all__ = ["router"]

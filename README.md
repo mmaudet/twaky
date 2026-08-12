@@ -472,6 +472,35 @@ uv run twaky mail-sentinel decisions stats --days 7
 uv run twaky mail-sentinel replay --since 3d --limit 20 --dry-run
 ```
 
+### Rules Propose/Apply (SP6d)
+
+Rules mutations from the UI now go through a two-step flow: an
+operator drafts the rule, clicks **Preview matches** to see which
+of the last 200 historical decisions would have matched (and
+which would have been pre-empted by an earlier-priority rule),
+ticks "I have reviewed the matches", then clicks **Apply**.
+
+The same protection is enforced backend-side:
+
+```bash
+curl -X POST https://twaky.${BASE_DOMAIN}/mail-sentinel/rules/propose \
+     -H "Cookie: twaky_session=$COOKIE" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "name": "test-rule",
+       "priority": 50,
+       "enabled": true,
+       "conditions": [{"field": "from", "operator": "contains", "value": "@newsletter.example"}],
+       "combinator": "all",
+       "actions": ["archive", "label:newsletter"],
+       "window": {"kind": "recent", "count": 200}
+     }' | jq
+```
+
+Returns `matched_count`, `would_shadow_count`, `matched_examples`
+(up to 10), and a `simulation_partial` flag when the rule uses
+header or body predicates the simulation cannot fully evaluate.
+
 ### Recent Spam tab + Restore
 
 The mail sentinel can optionally short-circuit spam BEFORE the full LLM
@@ -491,6 +520,15 @@ pipeline runs. Enable via /sentinels/mail#recent-spam:
    - **none**: pass-through (unchanged pipeline).
 3. Review decisions in the Recent Spam tab; click Restore on any row
    to clear the spam keywords (mail reappears clean in INBOX).
+
+**Origin mailbox (SP6d)**: each new decision captures the JMAP
+mailbox the mail arrived in (typically `inbox`, but could be
+`newsletter` if a rule filed it) plus a small subset of envelope
+headers used by the rules Propose simulation. The Recent Spam
+tab shows the role as a subdued badge. Pre-SP6d decisions show
+"—" for Origin — the column is populated forward-only. Run
+`sql/013_add_spam_decision_provenance.sh` in the twaky-pg
+container to enable capture (idempotent, non-blocking).
 
 Retention: 30 days for active decisions, 90 days for restored (audit
 trail). Owner can tune thresholds via PATCH /sentinels/mail with

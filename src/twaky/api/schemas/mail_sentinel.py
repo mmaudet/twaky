@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Rule schemas
@@ -112,11 +112,65 @@ class LearnedPatternSummary(BaseModel):
     is_active: bool
 
 
+# ---------------------------------------------------------------------------
+# Propose-rule schemas (SP6d)
+# ---------------------------------------------------------------------------
+
+
+class ProposeWindow(BaseModel):
+    """Window specification for the propose endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = "recent"
+    count: int = Field(default=200, ge=1)
+
+
+class MailRuleProposeRequest(BaseModel):
+    """Payload for POST /mail-sentinel/rules/propose."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    priority: int = Field(default=100, ge=1, le=100)
+    enabled: bool = True
+    conditions: list[dict[str, Any]] = []
+    combinator: str = "OR"
+    actions: list[str]
+    window: ProposeWindow = Field(default_factory=ProposeWindow)
+
+
+class MatchedExample(BaseModel):
+    """A single matched example row in the propose response."""
+
+    decision_id: str
+    sender: str
+    subject: str
+    current_bucket: str
+    would_shadow_by: str | None
+
+
+class MailRuleProposeResponse(BaseModel):
+    """Response shape for POST /mail-sentinel/rules/propose."""
+
+    valid: bool
+    matched_count: int
+    would_shadow_count: int
+    matched_examples: list[MatchedExample]
+    would_shadow: list[str]
+    simulation_partial: bool
+    simulation_partial_reason: str | None
+
+
 __all__ = [
     "LearnedPatternSummary",
     "MailMemorySummary",
     "MailRuleCreate",
     "MailRuleDetail",
     "MailRulePatch",
+    "MailRuleProposeRequest",
+    "MailRuleProposeResponse",
     "MailRuleSummary",
+    "MatchedExample",
+    "ProposeWindow",
 ]

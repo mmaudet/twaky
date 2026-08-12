@@ -83,7 +83,11 @@ def _get_mail_adapter() -> JmapMailAdapter:
 # ---------------------------------------------------------------------------
 
 
-def _to_schema(d: spam_decisions.SpamDecision) -> SpamDecision:
+def _to_schema(
+    d: spam_decisions.SpamDecision,
+    *,
+    with_provenance: bool = False,
+) -> SpamDecision:
     return SpamDecision(
         id=d.id,
         email_id=d.email_id,
@@ -98,6 +102,12 @@ def _to_schema(d: spam_decisions.SpamDecision) -> SpamDecision:
         restored_at=d.restored_at,
         restored_by=d.restored_by,
         decided_at=d.decided_at,
+        origin_mailbox_id=getattr(d, "origin_mailbox_id", None)
+        if with_provenance
+        else None,
+        origin_mailbox_role=getattr(d, "origin_mailbox_role", None)
+        if with_provenance
+        else None,
     )
 
 
@@ -111,6 +121,7 @@ def list_spam(
     bucket: str | None = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     before: datetime | None = None,
+    with_provenance: bool = False,
     _email: str = Depends(require_owner),
 ) -> list[SpamDecision]:
     """Return recent spam decisions ordered by decided_at DESC.
@@ -118,9 +129,12 @@ def list_spam(
     Optionally filter by ``bucket`` (``spam``, ``newsletter``,
     ``phishing-alert``) and/or cursor ``before`` (ISO-8601 datetime).
     ``limit`` is bounded 1..500, defaulting to 50.
+
+    Pass ``with_provenance=true`` to populate ``origin_mailbox_id`` and
+    ``origin_mailbox_role`` fields (omitted by default for backward compat).
     """
     rows = spam_decisions.list_recent(bucket=bucket, limit=limit, before=before)
-    return [_to_schema(r) for r in rows]
+    return [_to_schema(r, with_provenance=with_provenance) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -176,9 +190,7 @@ def restore(
                 inbox_id = resolver("inbox")
             except Exception:  # noqa: BLE001
                 inbox_id = None  # keep going; keywords still get cleared
-        mailbox_patches: dict[str, bool] = (
-            {inbox_id: True} if inbox_id else {}
-        )
+        mailbox_patches: dict[str, bool] = {inbox_id: True} if inbox_id else {}
         adapter.set_keywords_bulk(
             d.email_id,
             {

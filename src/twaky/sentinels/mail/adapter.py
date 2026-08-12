@@ -102,6 +102,22 @@ class MailAdapter(Protocol):
         """
         ...
 
+    def resolve_role_mailbox_id(self, role: str) -> str:
+        """Resolve the id of the mailbox with the given RFC 8621 role.
+
+        Raises ``RuntimeError`` when no mailbox carries the requested role.
+        """
+        ...
+
+    def resolve_mailbox_role_by_id(self, mid: str) -> str | None:
+        """Return the RFC 8621 role for mailbox *mid*, or None if unknown.
+
+        Inverse of ``resolve_role_mailbox_id``. Reuses the same
+        ``Mailbox/get`` cache — no extra round-trip after the first call to
+        either helper.
+        """
+        ...
+
 
 class InMemoryMailAdapter:
     """In-memory mail adapter for tests and eval fixtures.
@@ -112,9 +128,16 @@ class InMemoryMailAdapter:
         Optional mapping of ``email_id → email dict`` to pre-populate the
         store.  Each email dict must contain at least ``"id"`` and
         ``"threadId"``.  ``"receivedAt"`` is used for thread ordering.
+    mailbox_roles:
+        Optional mapping of ``mailbox_id → role`` to support
+        ``resolve_mailbox_role_by_id`` in tests that need it.
     """
 
-    def __init__(self, seed: dict[str, dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        seed: dict[str, dict[str, Any]] | None = None,
+        mailbox_roles: dict[str, str] | None = None,
+    ) -> None:
         self._emails: dict[str, dict[str, Any]] = dict(seed) if seed else {}
         self._labels: dict[str, list[str]] = {}
         self._archived: set[str] = set()
@@ -122,6 +145,13 @@ class InMemoryMailAdapter:
         self._drafts: list[dict[str, Any]] = []
         self._keywords: dict[str, dict[str, bool]] = {}
         self._mailboxes: dict[str, dict[str, bool]] = {}
+        # For resolve_role_mailbox_id / resolve_mailbox_role_by_id in tests.
+        self._mailbox_ids_by_role: dict[str, str] = {}
+        self._mailbox_roles_by_id: dict[str, str] = {}
+        if mailbox_roles:
+            for mid, role in mailbox_roles.items():
+                self._mailbox_roles_by_id[mid] = role
+                self._mailbox_ids_by_role[role] = mid
 
     # ------------------------------------------------------------------
     # Helper
@@ -209,6 +239,19 @@ class InMemoryMailAdapter:
                 else:
                     mbox_map.pop(mbox_id, None)
 
+    def resolve_role_mailbox_id(self, role: str) -> str:
+        """Resolve the id of the mailbox with the given RFC 8621 role.
+
+        Raises ``RuntimeError`` when the role is not registered.
+        """
+        if role in self._mailbox_ids_by_role:
+            return self._mailbox_ids_by_role[role]
+        raise RuntimeError(f"no mailbox with role={role!r} found on this account")
+
+    def resolve_mailbox_role_by_id(self, mid: str) -> str | None:
+        """Return the RFC 8621 role for mailbox *mid*, or None if unknown."""
+        return self._mailbox_roles_by_id.get(mid)
+
 
 class JmapMailAdapter:
     """Synchronous JMAP mail adapter.
@@ -253,8 +296,11 @@ class JmapMailAdapter:
         # ``$drafts`` name in ``mailboxIds`` and expects the actual UUID.
         self._drafts_mailbox_id: str | None = None
         # Cache of resolved mailbox ids keyed by JMAP ``role`` (RFC 8621 §2.1.4).
-        # Populated on demand by ``_resolve_role_mailbox_id``.
+        # Populated on demand by ``resolve_role_mailbox_id``.
         self._mailbox_ids_by_role: dict[str, str] = {}
+        # Parallel cache keyed by mailbox id → role, populated on the same
+        # Mailbox/get fetch as ``_mailbox_ids_by_role``.
+        self._mailbox_roles_by_id: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Internal helper
@@ -376,6 +422,23 @@ class JmapMailAdapter:
             },
         )
 
+    def _fetch_all_mailboxes(self) -> None:
+        """Fetch all mailboxes and populate both role-keyed caches.
+
+        Called once; subsequent lookups via ``resolve_role_mailbox_id`` or
+        ``resolve_mailbox_role_by_id`` are served from cache.
+        """
+        result = self._call(
+            "Mailbox/get",
+            {"ids": None, "properties": ["id", "role"]},
+        )
+        for mbox in result.get("list") or []:
+            m_role = mbox.get("role")
+            m_id = str(mbox["id"])
+            if m_role:
+                self._mailbox_ids_by_role[str(m_role)] = m_id
+                self._mailbox_roles_by_id[m_id] = str(m_role)
+
     def resolve_role_mailbox_id(self, role: str) -> str:
         """Resolve and cache the id of the mailbox with the given RFC 8621 role.
 
@@ -394,19 +457,24 @@ class JmapMailAdapter:
         """
         if role in self._mailbox_ids_by_role:
             return self._mailbox_ids_by_role[role]
-        result = self._call(
-            "Mailbox/get",
-            {"ids": None, "properties": ["id", "role"]},
-        )
-        for mbox in result.get("list") or []:
-            m_role = mbox.get("role")
-            if m_role:
-                self._mailbox_ids_by_role[str(m_role)] = str(mbox["id"])
+        self._fetch_all_mailboxes()
         if role not in self._mailbox_ids_by_role:
-            raise RuntimeError(
-                f"no mailbox with role={role!r} found on this account"
-            )
+            raise RuntimeError(f"no mailbox with role={role!r} found on this account")
         return self._mailbox_ids_by_role[role]
+
+    def resolve_mailbox_role_by_id(self, mid: str) -> str | None:
+        """Return the RFC 8621 role for mailbox *mid*, or None if unknown.
+
+        Inverse of ``resolve_role_mailbox_id``. Shares the same
+        ``Mailbox/get`` cache — no extra round-trip after the first call to
+        either helper.
+        """
+        if mid in self._mailbox_roles_by_id:
+            return self._mailbox_roles_by_id[mid]
+        # Cache may be empty if this is the first call; fetch all mailboxes.
+        if not self._mailbox_roles_by_id:
+            self._fetch_all_mailboxes()
+        return self._mailbox_roles_by_id.get(mid)
 
     def _resolve_drafts_mailbox_id(self) -> str:
         """Back-compat alias — resolves the Drafts mailbox id.
@@ -524,9 +592,7 @@ class JmapMailAdapter:
         semantics (unarchive + clear labels) stay atomic — a partial success
         would leave the email in an inconsistent state.
         """
-        patch_dict: dict[str, bool] = {
-            f"keywords/{k}": v for k, v in patches.items()
-        }
+        patch_dict: dict[str, bool] = {f"keywords/{k}": v for k, v in patches.items()}
         if mailbox_patches:
             for mbox_id, add in mailbox_patches.items():
                 patch_dict[f"mailboxIds/{mbox_id}"] = add

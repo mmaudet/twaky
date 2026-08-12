@@ -176,7 +176,7 @@ def _condition_matches(email: dict[str, Any], cond: dict[str, Any]) -> bool:
     return False
 
 
-def _rule_matches_static(email: dict[str, Any], rule: MailRule) -> bool | None:
+def rule_matches_static(email: dict[str, Any], rule: MailRule) -> bool | None:
     """Evaluate a rule's static conditions against an email.
 
     Returns
@@ -280,7 +280,7 @@ def make_match_rules(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
         residual: list[MailRule] = []
 
         for rule in all_rules:
-            verdict = _rule_matches_static(latest, rule)
+            verdict = rule_matches_static(latest, rule)
             if verdict is True:
                 log.debug("match_rules: static → %r", rule.name)
                 return {"matched_by": "static", "rule_name": rule.name}
@@ -668,7 +668,7 @@ def make_select_memories(
         ]
 
         # Stage 6: Call LLM
-        prompt = select_memories_prompt(state, pool_dicts)
+        prompt = select_memories_prompt(dict(state), pool_dicts)
         output: SelectMemoriesOutput = structured_call(
             prompt,
             SelectMemoriesOutput,
@@ -1024,6 +1024,33 @@ def _parse_iso(value: str | None) -> datetime:
         return datetime.now(UTC)
 
 
+_ENVELOPE_HEADER_KEYS = frozenset(
+    [
+        "from",
+        "to",
+        "subject",
+        "list-unsubscribe",
+        "list-id",
+        "authentication-results",
+    ]
+)
+
+
+def _extract_envelope_headers(email: dict[str, Any]) -> dict[str, str]:
+    """Extract a whitelisted subset of headers from the JMAP email dict.
+
+    The JMAP ``headers`` property is a list of ``{"name": ..., "value": ...}``
+    dicts. We collect only the keys in ``_ENVELOPE_HEADER_KEYS`` (lower-cased),
+    taking the first occurrence of each and copying the raw string value.
+    """
+    result: dict[str, str] = {}
+    for h in email.get("headers") or []:
+        name = h.get("name", "").lower()
+        if name in _ENVELOPE_HEADER_KEYS and name not in result:
+            result[name] = str(h.get("value") or "")
+    return result
+
+
 def _terminate(
     ctx: NodeContext,
     email: dict[str, Any],
@@ -1040,10 +1067,53 @@ def _terminate(
     - newsletter: label newsletter + set_keyword nonjunk=True
     - phishing-alert only: emit mission via mission_emitter
 
+    For spam/phishing-alert also captures provenance (origin mailbox + envelope
+    headers) before the Junk move and passes them to the store.
+
     Returns the state dict triggering pipeline routing (END for spam/phishing-alert,
     continue for newsletter).
     """
     email_id: str = email["id"]
+
+    # ------------------------------------------------------------------
+    # Provenance capture for spam / phishing-alert (SP6d T1 D2)
+    # Must happen BEFORE the Junk move so mailboxIds still show origin.
+    # ------------------------------------------------------------------
+    origin_mailbox_id: str | None = None
+    origin_mailbox_role: str | None = None
+    envelope_headers: dict[str, str] | None = None
+
+    if bucket in {"spam", "phishing-alert"}:
+        # Determine origin mailbox (first mailboxId that is NOT Junk).
+        try:
+            junk_resolver = getattr(ctx.mail, "resolve_role_mailbox_id", None)
+            junk_id_for_provenance: str | None = (
+                junk_resolver("junk") if callable(junk_resolver) else None
+            )
+        except Exception:  # noqa: BLE001
+            junk_id_for_provenance = None
+
+        current_mbox_ids: dict[str, bool] = email.get("mailboxIds") or {}
+        for mid in current_mbox_ids:
+            if mid != junk_id_for_provenance:
+                origin_mailbox_id = mid
+                break
+        # If all mailboxIds == junk (unusual), origin_mailbox_id remains None.
+
+        # Resolve origin mailbox role via the new inverse helper.
+        if origin_mailbox_id is not None:
+            try:
+                role_resolver = getattr(ctx.mail, "resolve_mailbox_role_by_id", None)
+                origin_mailbox_role = (
+                    role_resolver(origin_mailbox_id)
+                    if callable(role_resolver)
+                    else None
+                )
+            except Exception:  # noqa: BLE001
+                origin_mailbox_role = None
+
+        # Extract whitelisted envelope headers from the already-fetched email.
+        envelope_headers = _extract_envelope_headers(email) or None
 
     if bucket in {"spam", "phishing-alert"}:
         # Label + $junk keyword + move to the Junk mailbox (RFC 8621 role="junk").
@@ -1098,6 +1168,9 @@ def _terminate(
         signal_source=signal,
         score=score,
         reason=reason,
+        origin_mailbox_id=origin_mailbox_id,
+        origin_mailbox_role=origin_mailbox_role,
+        envelope_headers=envelope_headers,
     )
 
     if bucket == "phishing-alert":
@@ -1292,4 +1365,5 @@ __all__ = [
     "make_select_memories",
     "make_spam_triage",
     "make_thread_status",
+    "rule_matches_static",
 ]
