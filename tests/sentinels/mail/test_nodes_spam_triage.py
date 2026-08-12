@@ -260,6 +260,186 @@ class TestSpamTriageStage2:
         assert result == {"spam_bucket": None}
 
 
+class TestSpamTriageRspamdParser:
+    """Regex + score parser for org.apache.james.rspamd.status.
+
+    James emits ``actions=<action> score=<X> requiredScore=<Y>`` (plural
+    ``actions``), which the pre-fix ``action=`` regex missed silently —
+    Stage 2 never fired, and the pipeline pass-throughed every mail.
+    See 2026-08-12 spam-flow diagnosis.
+    """
+
+    def test_parses_actions_plural_from_james(self) -> None:
+        """James's actual header: ``No, actions=greylist score=5.4 requiredScore=12.0``."""
+        from twaky.sentinels.mail.nodes import _parse_rspamd_status
+
+        headers = [
+            {
+                "name": "org.apache.james.rspamd.status",
+                "value": "No, actions=greylist score=5.47559 requiredScore=12.0",
+            }
+        ]
+        assert _parse_rspamd_status(headers) == "greylist"
+
+    def test_parses_action_singular_backward_compat(self) -> None:
+        """Legacy pre-James format ``action=<x>; score=<y>`` still parses."""
+        from twaky.sentinels.mail.nodes import _parse_rspamd_status
+
+        headers = [
+            {
+                "name": "org.apache.james.rspamd.status",
+                "value": "default: action=reject; score=15.0",
+            }
+        ]
+        assert _parse_rspamd_status(headers) == "reject"
+
+    def test_parses_no_action_multi_word(self) -> None:
+        """``actions=no action`` — two-word action, must not eat ``score=`` after."""
+        from twaky.sentinels.mail.nodes import _parse_rspamd_status
+
+        headers = [
+            {
+                "name": "org.apache.james.rspamd.status",
+                "value": "No, actions=no action score=1.299169 requiredScore=12.0",
+            }
+        ]
+        assert _parse_rspamd_status(headers) == "no action"
+
+    def test_score_parser_extracts_float(self) -> None:
+        from twaky.sentinels.mail.nodes import _parse_rspamd_score
+
+        headers = [
+            {
+                "name": "org.apache.james.rspamd.status",
+                "value": "No, actions=no action score=5.47559 requiredScore=12.0",
+            }
+        ]
+        assert _parse_rspamd_score(headers) == pytest.approx(5.47559)
+
+    def test_score_parser_negative(self) -> None:
+        from twaky.sentinels.mail.nodes import _parse_rspamd_score
+
+        headers = [
+            {
+                "name": "org.apache.james.rspamd.status",
+                "value": "No, actions=no action score=-0.8 requiredScore=12.0",
+            }
+        ]
+        assert _parse_rspamd_score(headers) == pytest.approx(-0.8)
+
+    def test_score_parser_returns_none_when_missing(self) -> None:
+        from twaky.sentinels.mail.nodes import _parse_rspamd_score
+
+        assert _parse_rspamd_score([]) is None
+        assert (
+            _parse_rspamd_score(
+                [{"name": "org.apache.james.rspamd.status", "value": "malformed"}]
+            )
+            is None
+        )
+
+
+class TestSpamTriageScoreOverride:
+    """Score-aware grey-zone override: if rspamd score >= threshold, force LLM
+    even when James set ``nonjunk``. Motivated by the 2026-08-12 diagnosis:
+    James's ``requiredScore=12`` makes ``nonjunk`` an unreliable ham signal.
+    """
+
+    def test_high_score_with_nonjunk_forces_llm_grey_zone(self) -> None:
+        """nonjunk=True + rspamd score=5.4 (>= 3.0) → LLM called."""
+        ctx = _ctx()
+        email = _email(
+            keywords={"nonjunk": True},
+            headers=[
+                {
+                    "name": "org.apache.james.rspamd.status",
+                    "value": "No, actions=no action score=5.4 requiredScore=12.0",
+                }
+            ],
+        )
+        node = make_spam_triage(ctx)
+
+        # LLM says newsletter with 0.85 confidence — final bucket=newsletter
+        llm_out = SpamCheckOutput(
+            bucket="newsletter", confidence=0.85, reason="marketing"
+        )
+        with patch(
+            "twaky.sentinels.mail.nodes.structured_call", return_value=llm_out
+        ) as mock_llm:
+            result = node(_state(email))  # type: ignore[arg-type]
+
+        mock_llm.assert_called_once()
+        assert result["spam_bucket"] == "newsletter"
+
+    def test_low_score_with_nonjunk_still_passes_through(self) -> None:
+        """nonjunk=True + rspamd score=1.3 (< 3.0) → pass-through, no LLM."""
+        ctx = _ctx()
+        email = _email(
+            keywords={"nonjunk": True},
+            headers=[
+                {
+                    "name": "org.apache.james.rspamd.status",
+                    "value": "No, actions=no action score=1.3 requiredScore=12.0",
+                }
+            ],
+        )
+        node = make_spam_triage(ctx)
+
+        with (
+            patch("twaky.sentinels.mail.nodes.structured_call") as mock_llm,
+            patch("twaky.sentinels.mail.nodes.spam_decisions.insert") as mock_insert,
+        ):
+            result = node(_state(email))  # type: ignore[arg-type]
+
+        assert result == {"spam_bucket": None}
+        mock_llm.assert_not_called()
+        mock_insert.assert_not_called()
+
+    def test_no_rspamd_status_with_nonjunk_passes_through(self) -> None:
+        """nonjunk=True + no rspamd status header at all → pass-through.
+
+        Preserves the SP6c behaviour for accounts without rspamd
+        integration.
+        """
+        ctx = _ctx()
+        email = _email(keywords={"nonjunk": True})
+        node = make_spam_triage(ctx)
+
+        with (
+            patch("twaky.sentinels.mail.nodes.structured_call") as mock_llm,
+            patch("twaky.sentinels.mail.nodes.spam_decisions.insert") as mock_insert,
+        ):
+            result = node(_state(email))  # type: ignore[arg-type]
+
+        assert result == {"spam_bucket": None}
+        mock_llm.assert_not_called()
+        mock_insert.assert_not_called()
+
+    def test_high_score_without_nonjunk_forces_llm_via_grey_zone(self) -> None:
+        """No keyword at all + rspamd score=5.4 → LLM called."""
+        ctx = _ctx()
+        email = _email(
+            keywords={},
+            headers=[
+                {
+                    "name": "org.apache.james.rspamd.status",
+                    "value": "No, actions=no action score=5.4 requiredScore=12.0",
+                }
+            ],
+        )
+        node = make_spam_triage(ctx)
+
+        llm_out = SpamCheckOutput(bucket="none", confidence=0.6, reason="uncertain")
+        with patch(
+            "twaky.sentinels.mail.nodes.structured_call", return_value=llm_out
+        ) as mock_llm:
+            result = node(_state(email))  # type: ignore[arg-type]
+
+        mock_llm.assert_called_once()
+        # LLM below threshold → still pass-through
+        assert result == {"spam_bucket": None}
+
+
 class TestSpamTriageStage3:
     def test_stage3_newsletter_heuristic_labels(self) -> None:
         """Stage 3: list-unsubscribe present + score < 5 → bucket=newsletter, no LLM.

@@ -921,8 +921,14 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
 _HEURISTIC_NEWSLETTER_MAX_SCORE = 5
 _HEURISTIC_GREY_MIN_SCORE = 4
 
-# Regex to parse rspamd action from org.apache.james.rspamd.status header
-_RSPAMD_ACTION_RE = re.compile(r"action=([\w\s]+?)(?:;|$)", re.IGNORECASE)
+# Regex to parse rspamd action from org.apache.james.rspamd.status header.
+# James emits "actions=<action>" (plural). Accept both spellings to stay
+# robust across upstream deployments. Stop at whitespace-followed-by-key=
+# so "actions=no action score=X" returns "no action", not "no action score".
+_RSPAMD_ACTION_RE = re.compile(r"actions?=([\w\s]+?)(?:;|\s+\w+=|$)", re.IGNORECASE)
+
+# Numeric score component of the same header, e.g. "score=5.47559".
+_RSPAMD_SCORE_RE = re.compile(r"score=(-?[\d.]+)", re.IGNORECASE)
 
 
 def _parse_rspamd_status(headers: list[dict[str, Any]]) -> str | None:
@@ -937,6 +943,28 @@ def _parse_rspamd_status(headers: list[dict[str, Any]]) -> str | None:
             if m:
                 return m.group(1).strip().lower()
     return None
+
+
+def _parse_rspamd_score(headers: list[dict[str, Any]]) -> float | None:
+    """Parse the numeric score from org.apache.james.rspamd.status header.
+
+    Returns the float score or None if the header is absent or unparseable.
+    """
+    for h in headers:
+        if h.get("name", "").lower() == "org.apache.james.rspamd.status":
+            m = _RSPAMD_SCORE_RE.search(h.get("value", ""))
+            if m:
+                try:
+                    return float(m.group(1))
+                except ValueError:
+                    return None
+    return None
+
+
+# rspamd score threshold above which we force LLM grey-zone even when
+# James set ``nonjunk`` (because James's requiredScore is often set very
+# high — 12+ — so ``nonjunk`` alone is a weak "not-spam" signal).
+_RSPAMD_SCORE_GREY_MIN = 3.0
 
 
 @dataclass
@@ -1248,8 +1276,17 @@ def make_spam_triage(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
         latest = thread[-1]
 
         # ----------------------------------------------------------------
-        # Stage 1 — Trust upstream rspamd via JMAP keywords
+        # Stage 1 — Trust upstream rspamd $junk marker only
         # ----------------------------------------------------------------
+        # $junk is either (a) a user-set spam mark or (b) rspamd's
+        # unambiguous reject. Both are strong signals — terminate.
+        # nonjunk is NOT trusted blindly: on James deployments with a
+        # high requiredScore (12+), rspamd sets nonjunk on obvious spam
+        # too (paypal phishing at score 0.0, list-mail at score 1.3),
+        # so the old hard pass-through here missed everything below the
+        # reject threshold. The score-aware override below (after Stage
+        # 2 parses the numeric score) forces LLM grey-zone for anything
+        # >= _RSPAMD_SCORE_GREY_MIN even when nonjunk is set.
         kw: dict[str, Any] = latest.get("keywords") or {}
         if kw.get("$junk"):
             return _terminate(
@@ -1260,22 +1297,21 @@ def make_spam_triage(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
                 score=None,
                 reason="upstream rspamd marked $junk",
             )
-        if kw.get("nonjunk"):
-            # rspamd said HAM — defer to it, no further checks, no DB row
-            return {"spam_bucket": None}
 
         # ----------------------------------------------------------------
         # Stage 2 — Trust upstream rspamd via org.apache.james.rspamd.status header
         # ----------------------------------------------------------------
-        rspamd_action = _parse_rspamd_status(latest.get("headers") or [])
+        rspamd_headers = latest.get("headers") or []
+        rspamd_action = _parse_rspamd_status(rspamd_headers)
+        rspamd_score = _parse_rspamd_score(rspamd_headers)
         if rspamd_action in {"reject", "soft reject"}:
             return _terminate(
                 ctx,
                 latest,
                 bucket="spam",
                 signal="rspamd_status_reject",
-                score=None,
-                reason=f"rspamd action={rspamd_action}",
+                score=None,  # score column stores 0..1 LLM confidence, not raw rspamd
+                reason=f"rspamd action={rspamd_action} score={rspamd_score}",
             )
         if rspamd_action == "rewrite subject":
             return _terminate(
@@ -1284,9 +1320,24 @@ def make_spam_triage(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
                 bucket="spam",
                 signal="rspamd_status_rewrite",
                 score=None,
-                reason="rspamd action=rewrite subject",
+                reason=f"rspamd action=rewrite subject score={rspamd_score}",
             )
         grey_zone = rspamd_action in {"add header", "greylist"}
+
+        # ----------------------------------------------------------------
+        # Score-aware grey-zone override: even if James set nonjunk (=1),
+        # a non-trivial rspamd score means the classifier saw signals
+        # worth double-checking. Route to LLM. Below the threshold and
+        # with nonjunk set → keep the pass-through (avoids blasting the
+        # LLM budget on obvious ham like calendar invites).
+        if rspamd_score is not None and rspamd_score >= _RSPAMD_SCORE_GREY_MIN:
+            grey_zone = True
+        elif kw.get("nonjunk") and (
+            rspamd_score is None or rspamd_score < _RSPAMD_SCORE_GREY_MIN
+        ):
+            # Genuinely clean per rspamd (or no rspamd verdict AND
+            # explicit nonjunk keyword — user marked it OK). Skip.
+            return {"spam_bucket": None}
 
         # ----------------------------------------------------------------
         # Stage 3 — Header heuristics
