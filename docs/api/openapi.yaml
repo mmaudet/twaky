@@ -1212,6 +1212,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/runs:
+    get:
+      tags:
+      - mail-sentinel-runs
+      summary: List Mail Runs
+      description: 'List the N most recent mail-pipeline runs, newest first.
+
+
+        Each row includes the base ``sentinel_run`` fields plus the linked
+
+        ``mail_sentinel_spam_decision`` (bucket + signal_source) when the
+
+        ``spam_triage`` node classified this email. Uses the ``event_ref``
+
+        on the run (which is the JMAP email id) as the join key.'
+      operationId: list_mail_runs_mail_sentinel_runs_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: before
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Before
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MailSentinelRun'
+                title: Response List Mail Runs Mail Sentinel Runs Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     Agent:
@@ -1692,6 +1743,80 @@ components:
       - condition_count
       title: MailRuleSummary
       description: Shallow representation used in the rules list endpoint.
+    MailSentinelRun:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        email_id:
+          type: string
+          title: Email Id
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        duration_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Ms
+        outcome:
+          type: string
+          title: Outcome
+        mission_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Mission Id
+        llm_calls:
+          type: integer
+          title: Llm Calls
+        error_repr:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Repr
+        spam_bucket:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Spam Bucket
+        spam_signal_source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Spam Signal Source
+        spam_decision_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Spam Decision Id
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - email_id
+      - started_at
+      - completed_at
+      - duration_ms
+      - outcome
+      - mission_id
+      - llm_calls
+      - error_repr
+      - spam_bucket
+      - spam_signal_source
+      - spam_decision_id
+      title: MailSentinelRun
+      description: One mail_sentinel run row + resolved spam decision (if any).
     Mission:
       properties:
         id:
