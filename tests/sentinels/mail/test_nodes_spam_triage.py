@@ -440,6 +440,135 @@ class TestSpamTriageScoreOverride:
         assert result == {"spam_bucket": None}
 
 
+class TestHeuristicImprovements:
+    """2026-08-13: loosened list-unsub + added TLD/random-local signals.
+
+    Based on 256-mail INBOX audit finding ~20 newsletters had only single
+    list-unsubscribe (not list-unsubscribe-post), and ~15 cold-outreach
+    mails came from suspicious TLDs (.click, .homes, .online, .info)
+    with random-consonant local parts (bot-generated).
+    """
+
+    def test_single_list_unsub_triggers_newsletter_signal(self) -> None:
+        """Only list-unsubscribe (no -post) → newsletter_signal=True.
+
+        Regression: SP6c required BOTH headers, missing legit newsletters
+        that send only the single header.
+        """
+        from twaky.sentinels.mail.nodes import _header_heuristic_score
+
+        result = _header_heuristic_score(
+            {
+                "from": [{"email": "news@example.com"}],
+                "headers": [
+                    {"name": "list-unsubscribe", "value": "<mailto:u@e.com>"},
+                    {"name": "dkim-signature", "value": "v=1; a=rsa-sha256"},
+                ],
+            }
+        )
+        assert result.newsletter_signal is True
+        assert result.summary["list_unsubscribe"] is True
+        assert result.summary["list_unsubscribe_post"] is False
+
+    def test_suspicious_tld_adds_score(self) -> None:
+        """TLD in _SUSPICIOUS_TLDS → +2 to total_score."""
+        from twaky.sentinels.mail.nodes import _header_heuristic_score
+
+        result = _header_heuristic_score(
+            {
+                "from": [{"email": "sender@shady.click"}],
+                "headers": [
+                    {"name": "dkim-signature", "value": "v=1"},
+                ],
+            }
+        )
+        # +2 for .click TLD only (dkim present, no list-unsub, no random local)
+        assert result.total_score == 2
+        assert result.summary["suspicious_tld"] is True
+
+    def test_random_local_part_adds_score(self) -> None:
+        """Sender local part matching /^[bcdfghjklmnpqrstvwxz]{5,10}$/ → +2."""
+        from twaky.sentinels.mail.nodes import _header_heuristic_score
+
+        result = _header_heuristic_score(
+            {
+                "from": [{"email": "oltiwbr@somedomain.com"}],
+                "headers": [
+                    {"name": "dkim-signature", "value": "v=1"},
+                ],
+            }
+        )
+        # +2 for random-consonant local (dkim present, no list-unsub,
+        # legit TLD)
+        assert result.total_score == 2
+        assert result.summary["random_local"] is True
+
+    def test_random_local_helper_true_cases(self) -> None:
+        from twaky.sentinels.mail.nodes import _is_random_local_part
+
+        # Real bot samples from the 2026-08-13 INBOX audit.
+        for local in ("oltiwbr", "eclybnm", "ecbarmd"):
+            assert _is_random_local_part(local), f"expected random: {local}"
+
+    def test_random_local_helper_false_cases(self) -> None:
+        from twaky.sentinels.mail.nodes import _is_random_local_part
+
+        # Real user local parts must NOT match (no 4-consonant cluster AND
+        # vowel ratio > 30%).
+        for local in (
+            "hello",  # 40% vowels, no cluster
+            "michel",  # 33% vowels, no cluster
+            "abc",  # too short (< 5)
+            "userverylong",  # too long (> 10)
+            "user123",  # has digits
+            "michel.maudet",  # has dot
+            "team",  # too short
+            "support",  # 28% vowels but no 4-consonant cluster
+            "pradise",  # 43% vowels, no cluster
+            "galaxo",  # 50% vowels, no cluster
+        ):
+            assert not _is_random_local_part(local), f"expected NOT random: {local}"
+
+    def test_suspicious_tld_helper(self) -> None:
+        from twaky.sentinels.mail.nodes import _has_suspicious_tld
+
+        for dom in (
+            "shady.click",
+            "sub.spammy.homes",
+            "foo.online",
+            "bar.info",
+            "grabber.tk",
+        ):
+            assert _has_suspicious_tld(dom), f"expected suspicious: {dom}"
+        for dom in (
+            "linagora.com",
+            "github.com",
+            "google.com",
+            "example.fr",
+        ):
+            assert not _has_suspicious_tld(dom), f"expected clean: {dom}"
+
+    def test_cold_outreach_click_tld_reaches_grey_min(self) -> None:
+        """.click TLD + bot-random local + missing DKIM → grey-zone.
+
+        Uses ``oltiwbr`` (real bot from 2026-08-13 UAT). ``pradise`` and
+        similar word-shaped locals are intentionally not flagged as
+        random — the TLD signal handles them.
+        """
+        from twaky.sentinels.mail.nodes import _header_heuristic_score
+
+        result = _header_heuristic_score(
+            {
+                "from": [{"email": "oltiwbr@spammy.click"}],
+                "headers": [],  # no DKIM
+            }
+        )
+        # +2 .click + +2 random local + +3 no DKIM = 7 (well above 4)
+        assert result.total_score >= 4
+        assert result.summary["suspicious_tld"] is True
+        assert result.summary["random_local"] is True
+
+
 class TestSpamTriageStage3:
     def test_stage3_newsletter_heuristic_labels(self) -> None:
         """Stage 3: list-unsubscribe present + score < 5 → bucket=newsletter, no LLM.

@@ -976,16 +976,76 @@ class _HeuristicResult:
     summary: dict[str, Any] = field(default_factory=dict)
 
 
+# TLDs heavily abused by cold-outreach + spam. Whitelist by exception if
+# a legitimate business ever uses one.
+_SUSPICIOUS_TLDS = frozenset(
+    {
+        ".click",
+        ".buzz",
+        ".homes",
+        ".online",
+        ".top",
+        ".xyz",
+        ".deals",
+        ".info",
+        ".tk",
+        ".ml",
+        ".ga",
+        ".cf",
+    }
+)
+
+# Match runs of 3+ consecutive consonants — real English/French words
+# occasionally hit 3 (e.g. "STRing", "SCReen") but rarely alongside a
+# low overall vowel density; bot aliases pair both.
+_CONSONANT_CLUSTER_RE = re.compile(r"[bcdfghjklmnpqrstvwxz]{3,}", re.IGNORECASE)
+
+
+def _is_random_local_part(local: str) -> bool:
+    """True when the local part looks bot-generated.
+
+    Criteria (all must hold):
+    - 5–10 alpha characters (no digits, dots, dashes, underscores).
+    - Vowel ratio ≤ 30% (real words like ``support`` 28%, ``michel`` 33%,
+      cluster around here).
+    - Contains a 3+ consecutive consonant cluster (rules out short
+      low-vowel words like ``bytes`` that lack a real cluster).
+
+    Catches bulk-mail bot patterns from 2026-08-13 UAT (``oltiwbr``,
+    ``eclybnm``, ``ecbarmd``). Rejects ``support``, ``michel``, common
+    English/French names, and dotted / digit-containing local parts.
+    """
+    if len(local) < 5 or len(local) > 10:
+        return False
+    if not local.isalpha():
+        return False
+    ll = local.lower()
+    vowels = sum(1 for c in ll if c in "aeiouy")
+    ratio_low = vowels / len(ll) <= 0.30
+    has_cluster = bool(_CONSONANT_CLUSTER_RE.search(ll))
+    return ratio_low and has_cluster
+
+
+def _has_suspicious_tld(domain: str) -> bool:
+    """True when the sender domain ends with a TLD abused by cold outreach."""
+    d = domain.lower()
+    return any(d.endswith(t) for t in _SUSPICIOUS_TLDS)
+
+
 def _header_heuristic_score(email: dict[str, Any]) -> _HeuristicResult:
     """Compute a small integer heuristic score from email headers.
 
     Score contributions:
-      +2  if both list-unsubscribe AND list-unsubscribe-post headers present
+      +2  if list-unsubscribe header present (SP6c required list-unsub-post
+          too; loosened 2026-08-13 after seeing legit newsletters send only
+          the single header — was missing ~20 newsletters per 256 mails)
       +3  if dkim-signature absent
       +3  if return-path domain != from domain (sender mismatch)
       +2  if hasAttachment AND dkim absent
+      +2  if sender TLD in _SUSPICIOUS_TLDS (.click, .buzz, .homes, …)
+      +2  if sender local part looks random-generated (bot-style)
 
-    ``newsletter_signal`` is set when both list-unsubscribe headers are present.
+    ``newsletter_signal`` is set when list-unsubscribe is present (any form).
     """
     headers: list[dict[str, Any]] = email.get("headers") or []
     # Build a lower-cased header-name → value dict (last value wins on dup)
@@ -995,13 +1055,19 @@ def _header_heuristic_score(email: dict[str, Any]) -> _HeuristicResult:
         if name:
             h[name] = hdr.get("value", "")
 
-    list_unsub_present = "list-unsubscribe" in h and "list-unsubscribe-post" in h
+    # Loosened 2026-08-13: single list-unsubscribe header is enough to
+    # mark as newsletter (spec §5.3 required BOTH which missed ~20 legit
+    # newsletters per 256-mail sample). The rule handler still gets to
+    # decide the action.
+    list_unsub_present = "list-unsubscribe" in h
+    list_unsub_post_present = "list-unsubscribe-post" in h
     dkim_present = "dkim-signature" in h
     has_attachment = bool(email.get("hasAttachment", False))
 
-    # Extract from domain
+    # Extract from domain + local
     from_list = email.get("from") or []
     from_email = from_list[0].get("email", "") if from_list else ""
+    from_local = from_email.split("@")[0].lower() if "@" in from_email else ""
     from_domain = from_email.split("@")[-1].lower() if "@" in from_email else ""
 
     # Extract return-path domain
@@ -1009,6 +1075,9 @@ def _header_heuristic_score(email: dict[str, Any]) -> _HeuristicResult:
     rp_email = return_path_val.strip("<>").strip()
     rp_domain = rp_email.split("@")[-1].lower() if "@" in rp_email else ""
     return_path_mismatch = bool(from_domain and rp_domain and from_domain != rp_domain)
+
+    suspicious_tld = _has_suspicious_tld(from_domain)
+    random_local = _is_random_local_part(from_local)
 
     score = 0
     if list_unsub_present:
@@ -1019,12 +1088,19 @@ def _header_heuristic_score(email: dict[str, Any]) -> _HeuristicResult:
         score += 3
     if has_attachment and not dkim_present:
         score += 2
+    if suspicious_tld:
+        score += 2
+    if random_local:
+        score += 2
 
     summary: dict[str, Any] = {
         "list_unsubscribe": list_unsub_present,
+        "list_unsubscribe_post": list_unsub_post_present,
         "dkim_present": dkim_present,
         "return_path_mismatch": return_path_mismatch,
         "has_attachment": has_attachment,
+        "suspicious_tld": suspicious_tld,
+        "random_local": random_local,
         "total_score": score,
     }
 
@@ -1378,7 +1454,11 @@ def make_spam_triage(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
             use_case=UseCase.SPAM_CHECK,
         )
 
-        spam_thresh = float(cfg.get("spam_llm_confidence_threshold", 0.85))
+        # Default lowered 2026-08-13 from 0.85 → 0.70 after UAT: Mistral
+        # returned confidence 0.7-0.8 on borderline spam (cold outreach,
+        # brand impersonation) and pipeline pass-throughed. Operator-tunable
+        # via config_values.spam_llm_confidence_threshold.
+        spam_thresh = float(cfg.get("spam_llm_confidence_threshold", 0.70))
         news_thresh = float(cfg.get("spam_llm_newsletter_threshold", 0.70))
 
         if out.bucket in {"spam", "phishing-alert"} and out.confidence >= spam_thresh:
