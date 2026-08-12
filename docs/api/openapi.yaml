@@ -1132,7 +1132,12 @@ paths:
 
         ``phishing-alert``) and/or cursor ``before`` (ISO-8601 datetime).
 
-        ``limit`` is bounded 1..500, defaulting to 50.'
+        ``limit`` is bounded 1..500, defaulting to 50.
+
+
+        Pass ``with_provenance=true`` to populate ``origin_mailbox_id`` and
+
+        ``origin_mailbox_role`` fields (omitted by default for backward compat).'
       operationId: list_spam_mail_sentinel_spam_get
       parameters:
       - name: bucket
@@ -1161,6 +1166,13 @@ paths:
             format: date-time
           - type: 'null'
           title: Before
+      - name: with_provenance
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: With Provenance
       responses:
         '200':
           description: Successful Response
@@ -2603,6 +2615,16 @@ components:
           type: string
           format: date-time
           title: Decided At
+        origin_mailbox_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Origin Mailbox Id
+        origin_mailbox_role:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Origin Mailbox Role
       additionalProperties: false
       type: object
       required:

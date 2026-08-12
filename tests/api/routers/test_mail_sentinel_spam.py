@@ -124,6 +124,8 @@ def _seed_decision(
     bucket: str = "spam",
     signal_source: str = "rspamd_junk_keyword",
     email_id: str | None = None,
+    origin_mailbox_id: str | None = None,
+    origin_mailbox_role: str | None = None,
 ) -> spam_decisions.SpamDecision:
     """Insert a spam decision row and return the full record."""
     if email_id is None:
@@ -138,6 +140,8 @@ def _seed_decision(
         signal_source=signal_source,
         score=None,
         reason=None,
+        origin_mailbox_id=origin_mailbox_id,
+        origin_mailbox_role=origin_mailbox_role,
     )
     row = spam_decisions.get(decision_id)
     assert row is not None
@@ -181,6 +185,60 @@ def test_list_filters_by_bucket(monkeypatch):
     body = r.json()
     assert len(body) == 1
     assert body[0]["bucket"] == "spam"
+
+
+# ---------------------------------------------------------------------------
+# GET /mail-sentinel/spam — provenance flag
+# ---------------------------------------------------------------------------
+
+
+def test_get_recent_without_provenance_omits_origin_fields(monkeypatch):
+    """Without ?with_provenance=1, origin fields are always None even when stored."""
+    _seed_decision(
+        origin_mailbox_id="mbox-abc123",
+        origin_mailbox_role="inbox",
+    )
+    r = _owner_client(monkeypatch).get("/mail-sentinel/spam")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["origin_mailbox_id"] is None
+    assert body[0]["origin_mailbox_role"] is None
+
+
+def test_get_recent_with_provenance_includes_origin_fields(monkeypatch):
+    """With ?with_provenance=1, stored values are returned.
+
+    Skipped when the migration (sql/013_*) hasn't been applied yet — in that
+    case the store uses a legacy INSERT without provenance columns, so there
+    is nothing to assert.
+    """
+    from twaky.sentinels.mail.store.spam_decisions import _detect_provenance_columns
+
+    if not _detect_provenance_columns():
+        pytest.skip("provenance columns not yet migrated (sql/013_* pending)")
+
+    _seed_decision(
+        origin_mailbox_id="mbox-abc123",
+        origin_mailbox_role="inbox",
+    )
+    r = _owner_client(monkeypatch).get("/mail-sentinel/spam?with_provenance=1")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["origin_mailbox_id"] == "mbox-abc123"
+    assert body[0]["origin_mailbox_role"] == "inbox"
+
+
+def test_get_recent_with_provenance_null_when_store_row_null(monkeypatch):
+    """With ?with_provenance=1 but store row has None, response has None."""
+    _seed_decision()  # no provenance values
+    r = _owner_client(monkeypatch).get("/mail-sentinel/spam?with_provenance=1")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["origin_mailbox_id"] is None
+    assert body[0]["origin_mailbox_role"] is None
 
 
 # ---------------------------------------------------------------------------

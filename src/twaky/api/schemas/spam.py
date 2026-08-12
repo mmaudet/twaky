@@ -26,6 +26,8 @@ class SpamDecision(BaseModel):
     restored_at: datetime | None
     restored_by: str | None
     decided_at: datetime
+    origin_mailbox_id: str | None = None
+    origin_mailbox_role: str | None = None
 
 
 class SpamStats(BaseModel):
