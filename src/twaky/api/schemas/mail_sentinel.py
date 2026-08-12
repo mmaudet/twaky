@@ -123,7 +123,7 @@ class ProposeWindow(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: str = "recent"
-    count: int = Field(default=200, ge=1)
+    count: int = Field(default=200, ge=1, le=2000)
 
 
 class MailRuleProposeRequest(BaseModel):

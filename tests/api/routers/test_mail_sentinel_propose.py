@@ -147,23 +147,25 @@ class TestProposeValidation:
         assert r.json()["error"]["code"] == "validation_failed"
 
     def test_propose_count_over_2000_returns_422(self):
-        """window.count > 2000 must return 422 with a clear message."""
+        """window.count > 2000 must return 422 — now enforced by pydantic le=2000.
+
+        The error shape changed from the router-emitted ``{"error": {"code":
+        "validation_failed", "message": "window.count … exceeds …"}}`` to
+        the app-wrapped pydantic error:
+        ``{"error": {"code": "validation_error", …, "detail": {"errors":
+        [{"type": "less_than_equal", "loc": ["body", "window", "count"], …}]}}}``.
+        """
         body = _propose_body(window={"kind": "recent", "count": 2001})
-        with (
-            patch(
-                "twaky.api.routers.mail_sentinel.spam_decisions.list_recent",
-                return_value=[],
-            ),
-            patch(
-                "twaky.api.routers.mail_sentinel.rules_store.list_all",
-                return_value=[],
-            ),
-        ):
-            r = _owner_client().post("/mail-sentinel/rules/propose", json=body)
+        r = _owner_client().post("/mail-sentinel/rules/propose", json=body)
         assert r.status_code == 422
         data = r.json()
-        assert data["error"]["code"] == "validation_failed"
-        assert "2000" in data["error"]["message"]
+        # App-wrapped pydantic validation error shape
+        assert data["error"]["code"] == "validation_error"
+        errors = data["error"]["detail"]["errors"]
+        assert len(errors) >= 1
+        err = errors[0]
+        assert err["type"] == "less_than_equal"
+        assert "count" in err["loc"]
 
     def test_propose_invalid_action_returns_422(self):
         """Unknown action string must return 422 with validation_failed."""
