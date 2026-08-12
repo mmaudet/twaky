@@ -38,9 +38,11 @@ pytestmark = pytest.mark.skipif(
 
 def _cypher(cur, body: str, alias: str = "v agtype") -> list:
     tag = "$CQR$"
+    cur.execute("LOAD 'age';")
+    cur.execute('SET search_path = ag_catalog, "$user", public;')
     cur.execute(
-        f"LOAD 'age'; SET search_path = ag_catalog, \"$user\", public; "
-        f"SELECT * FROM cypher('{settings.twaky_graph_name}', {tag}{body}{tag}) AS ({alias});"
+        f"SELECT * FROM cypher('{settings.twaky_graph_name}', "
+        f"{tag}{body}{tag}) AS ({alias});"
     )
     return cur.fetchall()
 
