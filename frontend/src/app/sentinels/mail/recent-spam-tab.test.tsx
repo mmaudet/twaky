@@ -356,4 +356,32 @@ describe('RecentSpamTab', () => {
         expect(emdash).toBeTruthy()
         expect(emdash.textContent).toContain('—')
     })
+
+    it('test_origin_column_renders_code_slice_when_role_is_unknown_but_id_present', () => {
+        mockUseSentinel.mockReturnValue({
+            data: SENTINEL_ON,
+            isLoading: false,
+            error: null,
+        } as unknown as ReturnType<typeof useSentinel>)
+
+        mockUseSpamDecisions.mockReturnValue({
+            data: [
+                {
+                    ...SAMPLE_DECISIONS[0],
+                    origin_mailbox_role: 'custom-folder',
+                    origin_mailbox_id: 'abc123def456',
+                },
+            ],
+            isLoading: false,
+            error: null,
+        } as unknown as ReturnType<typeof useSpamDecisions>)
+
+        render(<RecentSpamTab />)
+
+        // Code element with truncated id (first 8 chars + ellipsis)
+        const codeEl = document.querySelector('code')
+        expect(codeEl).toBeTruthy()
+        expect(codeEl!.title).toBe('abc123def456')
+        expect(codeEl!.textContent).toContain('abc123de')
+    })
 })

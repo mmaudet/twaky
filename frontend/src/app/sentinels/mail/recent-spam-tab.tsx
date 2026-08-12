@@ -55,7 +55,7 @@ function OriginCell({
     if (role && KNOWN_ROLES.has(role)) {
         return <Badge variant="secondary">{role}</Badge>
     }
-    if (!role && id) {
+    if ((!role || !KNOWN_ROLES.has(role)) && id) {
         return (
             <code title={id}>
                 {id.slice(0, 8)}&hellip;
