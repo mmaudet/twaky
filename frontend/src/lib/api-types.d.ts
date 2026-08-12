@@ -676,6 +676,9 @@ export interface paths {
          *     Optionally filter by ``bucket`` (``spam``, ``newsletter``,
          *     ``phishing-alert``) and/or cursor ``before`` (ISO-8601 datetime).
          *     ``limit`` is bounded 1..500, defaulting to 50.
+         *
+         *     Pass ``with_provenance=true`` to populate ``origin_mailbox_id`` and
+         *     ``origin_mailbox_role`` fields (omitted by default for backward compat).
          */
         get: operations["list_spam_mail_sentinel_spam_get"];
         put?: never;
@@ -1558,6 +1561,10 @@ export interface components {
              * Format: date-time
              */
             decided_at: string;
+            /** Origin Mailbox Id */
+            origin_mailbox_id?: string | null;
+            /** Origin Mailbox Role */
+            origin_mailbox_role?: string | null;
         };
         /**
          * SpamStats
@@ -2792,6 +2799,7 @@ export interface operations {
                 bucket?: string | null;
                 limit?: number;
                 before?: string | null;
+                with_provenance?: boolean;
             };
             header?: never;
             path?: never;

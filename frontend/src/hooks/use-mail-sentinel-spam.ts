@@ -18,12 +18,16 @@ export interface SpamDecisionsFilter {
     bucket?: string
     limit?: number
     before?: string
+    withProvenance?: boolean
 }
 
 export function useSpamDecisions(filters: SpamDecisionsFilter = {}) {
-    const { bucket, limit = 50, before } = filters
+    const { bucket, limit = 50, before, withProvenance = false } = filters
     return useQuery({
-        queryKey: ['mail-spam-decisions', { bucket, before }] as const,
+        queryKey: [
+            'mail-spam-decisions',
+            { bucket, before, withProvenance },
+        ] as const,
         queryFn: async () => {
             const { data, error } = await api.GET('/mail-sentinel/spam', {
                 params: {
@@ -31,6 +35,7 @@ export function useSpamDecisions(filters: SpamDecisionsFilter = {}) {
                         bucket,
                         limit,
                         before,
+                        with_provenance: withProvenance,
                     },
                 },
             })
