@@ -435,6 +435,43 @@ without a restart.
 | `SENTINEL_MAX_CONCURRENT_EVENTS` | 4 | Bounded concurrency |
 | `SENTINEL_RUN_RETENTION_DAYS` | 30 | Prune old sentinel_run rows |
 
+### Mail sentinel CLI operations
+
+Two sub-command groups on `twaky mail-sentinel` for operators inspecting
+state without touching the UI or writing SQL by hand.
+
+**Rules** — `mail_sentinel_rule` table:
+
+```bash
+# List every rule ordered by priority (lower runs first)
+uv run twaky mail-sentinel rules list
+uv run twaky mail-sentinel rules list --enabled-only
+
+# Flip enabled/disabled — non-destructive, reversible
+uv run twaky mail-sentinel rules toggle github_notifications
+```
+
+**Spam decisions** — `mail_sentinel_spam_decision` table:
+
+```bash
+# 20 most recent decisions (all buckets)
+uv run twaky mail-sentinel decisions list
+
+# Filter by bucket
+uv run twaky mail-sentinel decisions list --bucket spam --recent 50
+uv run twaky mail-sentinel decisions list --bucket phishing-alert
+
+# Per-bucket counts + restore rate over N days
+uv run twaky mail-sentinel decisions stats --days 7
+```
+
+**Replay** — re-run the pipeline against historical INBOX mails:
+
+```bash
+# Dry-run: writes decisions to Postgres, skips JMAP side-effects
+uv run twaky mail-sentinel replay --since 3d --limit 20 --dry-run
+```
+
 ### Recent Spam tab + Restore
 
 The mail sentinel can optionally short-circuit spam BEFORE the full LLM
@@ -443,12 +480,14 @@ pipeline runs. Enable via /sentinels/mail#recent-spam:
 1. Toggle "Spam filter" ON.
 2. From now on, incoming inbox mails get classified into one of four
    buckets:
-   - **spam**: silently labeled + $junk keyword set; stays in INBOX but
-     your existing Twake Mail filters can move it to Junk.
+   - **spam**: labeled `__spam__`, `$junk` keyword set, and the message
+     is atomically moved to the JMAP `junk` role mailbox (Indésirables)
+     via `Email/set` with `mailboxIds` patched. On failure the keyword
+     is still set so a downstream James filter can move it.
    - **newsletter**: labeled `newsletter` + `nonjunk` keyword set;
      stays in INBOX; you can create rules that match `label:newsletter`.
-   - **phishing-alert**: labeled + `$junk` + a mission is emitted for
-     your review under /missions.
+   - **phishing-alert**: labeled + `$junk` + moved to `junk` role
+     mailbox + a mission is emitted for your review under /missions.
    - **none**: pass-through (unchanged pipeline).
 3. Review decisions in the Recent Spam tab; click Restore on any row
    to clear the spam keywords (mail reappears clean in INBOX).
