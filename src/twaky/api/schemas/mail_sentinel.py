@@ -134,18 +134,10 @@ class MailRuleProposeRequest(BaseModel):
     name: str
     priority: int = Field(default=100, ge=1, le=100)
     enabled: bool = True
-    condition: dict[str, Any]
+    conditions: list[dict[str, Any]] = []
+    combinator: str = "OR"
     actions: list[str]
     window: ProposeWindow = Field(default_factory=ProposeWindow)
-
-    @field_validator("name")
-    @classmethod
-    def _validate_name(cls, v: str) -> str:
-        import re
-
-        if not re.match(_NAME_PATTERN, v):
-            raise ValueError(f"name must match {_NAME_PATTERN!r}")
-        return v
 
 
 class MatchedExample(BaseModel):

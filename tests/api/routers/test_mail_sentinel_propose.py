@@ -84,6 +84,7 @@ def _fake_rule(
     priority: int = 50,
     enabled: bool = True,
     conditions: list[dict[str, Any]] | None = None,
+    combinator: str = "OR",
     actions: list[str] | None = None,
 ) -> MailRule:
     return MailRule(
@@ -92,7 +93,7 @@ def _fake_rule(
         description="",
         conditions=conditions
         or [{"field": "from", "operator": "contains", "value": "@"}],
-        combinator="OR",
+        combinator=combinator,
         actions=actions or ["archive"],
         priority=priority,
         enabled=enabled,
@@ -103,11 +104,13 @@ def _fake_rule(
 
 
 def _propose_body(**over) -> dict:
+    """Build a valid propose request body using the rules_store schema."""
     body: dict = {
         "name": "my-rule",
         "priority": 80,
         "enabled": True,
-        "condition": {"from_contains": "acme.com"},
+        "conditions": [{"field": "from", "operator": "contains", "value": "acme.com"}],
+        "combinator": "OR",
         "actions": ["archive"],
         "window": {"kind": "recent", "count": 200},
     }
@@ -133,20 +136,13 @@ class TestProposeUnauthenticated:
 
 class TestProposeValidation:
     def test_propose_invalid_rule_returns_422(self):
-        """An invalid condition schema must return 422 with validation_failed."""
-        # An empty condition dict has no keys → invalid
-        body = _propose_body(condition={})
-        with (
-            patch(
-                "twaky.api.routers.mail_sentinel.spam_decisions.list_recent",
-                return_value=[],
-            ),
-            patch(
-                "twaky.api.routers.mail_sentinel.rules_store.list_all",
-                return_value=[],
-            ),
-        ):
-            r = _owner_client().post("/mail-sentinel/rules/propose", json=body)
+        """An invalid condition (unknown field) must return 422 with validation_failed."""
+        body = _propose_body(
+            conditions=[
+                {"field": "nonexistent_field", "operator": "contains", "value": "x"}
+            ]
+        )
+        r = _owner_client().post("/mail-sentinel/rules/propose", json=body)
         assert r.status_code == 422
         assert r.json()["error"]["code"] == "validation_failed"
 
@@ -172,38 +168,14 @@ class TestProposeValidation:
     def test_propose_invalid_action_returns_422(self):
         """Unknown action string must return 422 with validation_failed."""
         body = _propose_body(actions=["fly_to_moon"])
-        with (
-            patch(
-                "twaky.api.routers.mail_sentinel.spam_decisions.list_recent",
-                return_value=[],
-            ),
-            patch(
-                "twaky.api.routers.mail_sentinel.rules_store.list_all",
-                return_value=[],
-            ),
-        ):
-            r = _owner_client().post("/mail-sentinel/rules/propose", json=body)
+        r = _owner_client().post("/mail-sentinel/rules/propose", json=body)
         assert r.status_code == 422
         assert r.json()["error"]["code"] == "validation_failed"
 
-    def test_propose_invalid_header_matches_regex_returns_422(self):
-        """Invalid regex in header_matches must return 422."""
-        body = _propose_body(
-            condition={
-                "header_matches": {"name": "List-Unsubscribe", "regex": "[unclosed"}
-            }
-        )
-        with (
-            patch(
-                "twaky.api.routers.mail_sentinel.spam_decisions.list_recent",
-                return_value=[],
-            ),
-            patch(
-                "twaky.api.routers.mail_sentinel.rules_store.list_all",
-                return_value=[],
-            ),
-        ):
-            r = _owner_client().post("/mail-sentinel/rules/propose", json=body)
+    def test_propose_invalid_combinator_returns_422(self):
+        """Unknown combinator must return 422 with validation_failed."""
+        body = _propose_body(combinator="XOR")
+        r = _owner_client().post("/mail-sentinel/rules/propose", json=body)
         assert r.status_code == 422
         assert r.json()["error"]["code"] == "validation_failed"
 
@@ -221,7 +193,9 @@ class TestProposeMatching:
             _fake_decision(sender_email="user@other.example", subject="Hi"),
             _fake_decision(sender_email="another@other.example", subject="Hey"),
         ]
-        body = _propose_body(condition={"from_contains": "acme.com"})
+        body = _propose_body(
+            conditions=[{"field": "from", "operator": "contains", "value": "acme.com"}]
+        )
 
         with (
             patch(
@@ -249,7 +223,7 @@ class TestProposeMatching:
         """Earlier-priority enabled rule that matches → would_shadow_count=1."""
         # A decision from acme.com
         decisions = [_fake_decision(sender_email="user@acme.com", subject="Invoice")]
-        # An earlier-priority rule (priority 40 < proposed 80) that matches "from contains acme"
+        # An earlier-priority rule (priority 40 < proposed 80) that matches from contains acme
         earlier_rule = _fake_rule(
             name="newsletter-unsub",
             priority=40,
@@ -258,7 +232,7 @@ class TestProposeMatching:
         )
 
         body = _propose_body(
-            condition={"from_contains": "acme.com"},
+            conditions=[{"field": "from", "operator": "contains", "value": "acme.com"}],
             priority=80,
         )
 
@@ -287,7 +261,9 @@ class TestProposeMatching:
             _fake_decision(sender_email="user@acme.com", subject=f"Email {i}")
             for i in range(20)
         ]
-        body = _propose_body(condition={"from_contains": "acme.com"})
+        body = _propose_body(
+            conditions=[{"field": "from", "operator": "contains", "value": "acme.com"}]
+        )
 
         with (
             patch(
@@ -314,7 +290,9 @@ class TestProposeMatching:
 
 class TestProposeSimulationPartial:
     def test_propose_simulation_partial_true_when_header_rule_and_null_headers(self):
-        """header_matches + one decision with envelope_headers=None → partial=True."""
+        """header:<Name> condition + a matched decision with null headers → partial=True."""
+        # One decision HAS headers (will match the header condition).
+        # One decision has null headers (matched rule evaluated against null headers row).
         decisions = [
             _fake_decision(
                 sender_email="user@lists.example.com",
@@ -322,18 +300,20 @@ class TestProposeSimulationPartial:
                     "list-unsubscribe": "<https://lists.example.com/unsub>"
                 },
             ),
+            # This decision also matches from=contains=lists but has null headers.
             _fake_decision(
-                sender_email="other@example.com",
-                envelope_headers=None,  # pre-migration row
+                sender_email="user@lists.example.com",
+                envelope_headers=None,
             ),
         ]
         body = _propose_body(
-            condition={
-                "header_matches": {
-                    "name": "list-unsubscribe",
-                    "regex": "https://",
+            conditions=[
+                {
+                    "field": "header:list-unsubscribe",
+                    "operator": "contains",
+                    "value": "https://",
                 }
-            }
+            ]
         )
 
         with (
@@ -350,19 +330,22 @@ class TestProposeSimulationPartial:
 
         assert r.status_code == 200
         data = r.json()
+        # The first decision matches (header present); second may not match (header missing).
+        # partial must be True because proposed rule uses a header field.
         assert data["simulation_partial"] is True
         assert data["simulation_partial_reason"] is not None
-        # Must mention the count of rows lacking headers
-        assert "1" in data["simulation_partial_reason"]
+        assert "header" in data["simulation_partial_reason"]
 
     def test_propose_simulation_partial_false_when_no_header_rule(self):
-        """Simple from_contains rule with all-null headers → partial=False."""
+        """Simple from contains rule with all-null headers → partial=False."""
         decisions = [
             _fake_decision(sender_email="user@acme.com", envelope_headers=None),
             _fake_decision(sender_email="other@example.com", envelope_headers=None),
         ]
         # Only matching the from field, not any headers
-        body = _propose_body(condition={"from_contains": "acme.com"})
+        body = _propose_body(
+            conditions=[{"field": "from", "operator": "contains", "value": "acme.com"}]
+        )
 
         with (
             patch(

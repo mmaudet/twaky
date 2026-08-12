@@ -1752,10 +1752,17 @@ components:
           type: boolean
           title: Enabled
           default: true
-        condition:
-          additionalProperties: true
-          type: object
-          title: Condition
+        conditions:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Conditions
+          default: []
+        combinator:
+          type: string
+          title: Combinator
+          default: OR
         actions:
           items:
             type: string
@@ -1767,7 +1774,6 @@ components:
       type: object
       required:
       - name
-      - condition
       - actions
       title: MailRuleProposeRequest
       description: Payload for POST /mail-sentinel/rules/propose.

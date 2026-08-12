@@ -176,7 +176,7 @@ def _condition_matches(email: dict[str, Any], cond: dict[str, Any]) -> bool:
     return False
 
 
-def _rule_matches_static(email: dict[str, Any], rule: MailRule) -> bool | None:
+def rule_matches_static(email: dict[str, Any], rule: MailRule) -> bool | None:
     """Evaluate a rule's static conditions against an email.
 
     Returns
@@ -280,7 +280,7 @@ def make_match_rules(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
         residual: list[MailRule] = []
 
         for rule in all_rules:
-            verdict = _rule_matches_static(latest, rule)
+            verdict = rule_matches_static(latest, rule)
             if verdict is True:
                 log.debug("match_rules: static → %r", rule.name)
                 return {"matched_by": "static", "rule_name": rule.name}
@@ -668,7 +668,7 @@ def make_select_memories(
         ]
 
         # Stage 6: Call LLM
-        prompt = select_memories_prompt(state, pool_dicts)
+        prompt = select_memories_prompt(dict(state), pool_dicts)
         output: SelectMemoriesOutput = structured_call(
             prompt,
             SelectMemoriesOutput,
@@ -1365,4 +1365,5 @@ __all__ = [
     "make_select_memories",
     "make_spam_triage",
     "make_thread_status",
+    "rule_matches_static",
 ]
