@@ -84,21 +84,26 @@ def test_delegate_returns_done_when_mission_completes():
     resolved_event = threading.Event()
 
     def _resolver():
-        # Wait briefly so delegate() has had time to declare the mission and start
-        # listening on mission_changed before we attempt to finish it.
-        time.sleep(0.5)
-        # Poll for a mission declared by sentinel:mail with our unique intent.
-        missions = repository.list_all(settings.twaky_owner_email, limit=20)
-        target = next(
-            (
-                m
-                for m in missions
-                if m.declared_by == "sentinel:mail"
-                and m.intent_text == unique_intent
-                and not m.state.is_terminal
-            ),
-            None,
-        )
+        # Poll repeatedly for our unique-intent mission — the outer test's
+        # `delegate()` might take longer than a fixed sleep to insert the
+        # mission under a loaded pytest run (flake #1 root cause). Loop
+        # until found or budget exhausted.
+        deadline = time.monotonic() + 4.0
+        target = None
+        while time.monotonic() < deadline and target is None:
+            missions = repository.list_all(settings.twaky_owner_email, limit=200)
+            target = next(
+                (
+                    m
+                    for m in missions
+                    if m.declared_by == "sentinel:mail"
+                    and m.intent_text == unique_intent
+                    and not m.state.is_terminal
+                ),
+                None,
+            )
+            if target is None:
+                time.sleep(0.1)
         if target is None:
             resolved_event.set()
             return
