@@ -81,6 +81,16 @@ class ExtractMemoriesOutput(BaseModel):
     memories: list[ExtractedMemory] = Field(default_factory=list, max_length=8)
 
 
+class SpamCheckOutput(BaseModel):
+    """Output from the spam-check node."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bucket: Literal["spam", "newsletter", "phishing-alert", "none"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason: str = Field(max_length=400)
+
+
 __all__ = [
     "ChooseRuleOutput",
     "DraftReplyOutput",
@@ -88,5 +98,6 @@ __all__ = [
     "ExtractedMemory",
     "LearnPatternOutput",
     "SelectMemoriesOutput",
+    "SpamCheckOutput",
     "ThreadStatusOutput",
 ]

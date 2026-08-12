@@ -4,6 +4,10 @@ Graph shape (see spec §6.10):
 
     load_thread
         │
+    spam_triage
+        │
+        ├─ bucket in {spam, phishing-alert} ──> END
+        │
     match_rules ─────────────────────────────┐
         │ (matched_by == "ai")               │
     learn_pattern                            │
@@ -19,6 +23,7 @@ Graph shape (see spec §6.10):
 from __future__ import annotations
 
 import time
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
@@ -30,8 +35,10 @@ from twaky.sentinels.mail.nodes import (
     make_load_thread,
     make_match_rules,
     make_select_memories,
+    make_spam_triage,
     make_thread_status,
 )
+from twaky.sentinels.mail.robustness import resilient_node
 from twaky.sentinels.mail.state import MailAgentState, ThreadStatus
 from twaky.sentinels.mail.store import rules as rules_store
 
@@ -55,6 +62,11 @@ def build_graph(ctx: NodeContext):
         A compiled LangGraph app ready for ``.invoke()``.
     """
 
+    def _route_after_spam_triage(state: MailAgentState) -> str:
+        if state.get("spam_bucket") in {"spam", "phishing-alert"}:
+            return END
+        return "match_rules"
+
     def _route_after_status(state: MailAgentState) -> str:
         if state.get("status") is not ThreadStatus.TO_REPLY:
             return END
@@ -68,16 +80,28 @@ def build_graph(ctx: NodeContext):
 
     graph: StateGraph = StateGraph(MailAgentState)
 
-    graph.add_node("load_thread", make_load_thread(ctx))  # type: ignore[call-overload]
-    graph.add_node("match_rules", make_match_rules(ctx))  # type: ignore[call-overload]
-    graph.add_node("learn_pattern", make_learn_pattern(ctx))  # type: ignore[call-overload]
-    graph.add_node("apply_actions", make_apply_actions(ctx))  # type: ignore[call-overload]
-    graph.add_node("thread_status", make_thread_status(ctx))  # type: ignore[call-overload]
-    graph.add_node("select_memories", make_select_memories(ctx))  # type: ignore[call-overload]
-    graph.add_node("draft_reply", make_draft_reply(ctx))  # type: ignore[call-overload]
+    # Each node wrapped by ``resilient_node`` for a 30s wall-time budget
+    # and a fatal-error trap — a single crashing email cannot bring down
+    # the pipeline for subsequent emails. See ``robustness.py``.
+    def _add(name: str, factory: Any) -> None:
+        graph.add_node(name, resilient_node(name, factory(ctx)))  # type: ignore[call-overload]
+
+    _add("load_thread", make_load_thread)
+    _add("spam_triage", make_spam_triage)
+    _add("match_rules", make_match_rules)
+    _add("learn_pattern", make_learn_pattern)
+    _add("apply_actions", make_apply_actions)
+    _add("thread_status", make_thread_status)
+    _add("select_memories", make_select_memories)
+    _add("draft_reply", make_draft_reply)
 
     graph.add_edge(START, "load_thread")
-    graph.add_edge("load_thread", "match_rules")
+    graph.add_edge("load_thread", "spam_triage")
+    graph.add_conditional_edges(
+        "spam_triage",
+        _route_after_spam_triage,
+        {"match_rules": "match_rules", END: END},
+    )
     graph.add_conditional_edges(
         "match_rules",
         _route_after_match,

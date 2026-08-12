@@ -50,16 +50,19 @@ MAILBOXES_RESPONSE: dict[str, Any] = {
 }
 
 SEED_RESPONSE: dict[str, Any] = {
+    # jmap_poll._seed_state now uses ``Email/get`` (returns ``state`` — a
+    # UUID acceptable to Email/changes.sinceState) instead of Email/query
+    # (which returns ``queryState`` — an opaque hex string James JMAP
+    # rejects at delta poll time). Response mimics Email/get with ids=[]:
+    # empty ``list`` + ``notFound``, plus a UUID-shaped ``state``.
     "methodResponses": [
         [
-            "Email/query",
+            "Email/get",
             {
                 "accountId": "acct-001",
-                "queryState": "state-0000",
-                "canCalculateChanges": True,
-                "position": 0,
-                "ids": [],
-                "total": 0,
+                "state": "state-0000",
+                "list": [],
+                "notFound": [],
             },
             "0",
         ]

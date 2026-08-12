@@ -111,9 +111,7 @@ class TestSelectMemories:
             "email_id": "e1",
         }
 
-        with patch(
-            "twaky.sentinels.mail.nodes.structured_call"
-        ) as mock_llm:
+        with patch("twaky.sentinels.mail.nodes.structured_call") as mock_llm:
             result = node(state)  # type: ignore[arg-type]
 
         assert result == {"memory_ids": []}
@@ -223,9 +221,7 @@ class TestSelectMemories:
             "email_id": "e1",
         }
 
-        with patch(
-            "twaky.sentinels.mail.nodes.structured_call"
-        ) as mock_llm:
+        with patch("twaky.sentinels.mail.nodes.structured_call") as mock_llm:
             result = node(state)  # type: ignore[arg-type]
 
         assert result == {"memory_ids": []}
@@ -241,9 +237,7 @@ class TestSelectMemories:
         node = make_select_memories(_ctx())
         state = {"email_id": "e1"}
 
-        with patch(
-            "twaky.sentinels.mail.nodes.structured_call"
-        ) as mock_llm:
+        with patch("twaky.sentinels.mail.nodes.structured_call") as mock_llm:
             result = node(state)  # type: ignore[arg-type]
 
         assert result == {"memory_ids": []}
@@ -262,9 +256,7 @@ class TestSelectMemories:
             "email_id": "e1",
         }
 
-        with patch(
-            "twaky.sentinels.mail.nodes.structured_call"
-        ) as mock_llm:
+        with patch("twaky.sentinels.mail.nodes.structured_call") as mock_llm:
             result = node(state)  # type: ignore[arg-type]
 
         assert result == {"memory_ids": []}
@@ -290,9 +282,7 @@ class TestSelectMemories:
             "email_id": "e1",
         }
 
-        with patch(
-            "twaky.sentinels.mail.nodes.structured_call"
-        ) as mock_llm:
+        with patch("twaky.sentinels.mail.nodes.structured_call") as mock_llm:
             result = node(state)  # type: ignore[arg-type]
 
         assert result == {"memory_ids": []}
@@ -401,7 +391,5 @@ class TestSelectMemories:
         ) as mock_llm:
             result = node(state)  # type: ignore[arg-type]
 
-        assert result == {
-            "memory_ids": [m_sender.id, m_domain.id, m_global.id]
-        }
+        assert result == {"memory_ids": [m_sender.id, m_domain.id, m_global.id]}
         mock_llm.assert_called_once()

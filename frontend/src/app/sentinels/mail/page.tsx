@@ -34,6 +34,7 @@ import { useMailMemories, type MailMemorySummary } from '@/hooks/use-mail-sentin
 import { useMailPatterns, useForgetMailPattern, type LearnedPatternSummary } from '@/hooks/use-mail-sentinel-patterns'
 import { useSentinelRuns } from '@/hooks/use-sentinels'
 import { AuthTab } from './auth-tab'
+import { RecentSpamTab } from './recent-spam-tab'
 import type { components } from '@/lib/api-types'
 
 type SentinelRunSummary = components['schemas']['SentinelRunSummary']
@@ -149,7 +150,9 @@ function RulesTab() {
                             <TableHead>Conditions</TableHead>
                             <TableHead>Actions</TableHead>
                             <TableHead>Enabled</TableHead>
-                            <TableHead>Priority</TableHead>
+                            <TableHead title="Lower priority runs first">
+                                Priority <span aria-hidden="true">↑</span>
+                            </TableHead>
                             <TableHead className="w-36" />
                         </TableRow>
                     </TableHeader>
@@ -414,6 +417,7 @@ export default function MailSentinelPage() {
                     <TabsTrigger value="patterns">Learned Patterns</TabsTrigger>
                     <TabsTrigger value="runs">Runs</TabsTrigger>
                     <TabsTrigger value="auth">Auth</TabsTrigger>
+                    <TabsTrigger value="recent-spam">Recent Spam</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="rules" className="mt-4">
@@ -430,6 +434,9 @@ export default function MailSentinelPage() {
                 </TabsContent>
                 <TabsContent value="auth" className="mt-4">
                     <AuthTab />
+                </TabsContent>
+                <TabsContent value="recent-spam" className="mt-4">
+                    <RecentSpamTab />
                 </TabsContent>
             </Tabs>
         </div>

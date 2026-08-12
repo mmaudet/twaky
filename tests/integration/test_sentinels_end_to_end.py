@@ -178,7 +178,9 @@ async def test_rabbitmq_event_source_delivers_and_run_inserted(monkeypatch) -> N
     # Use a unique sentinel_name suffix so the queue is freshly created each run.
     # This avoids picking up stale messages from a pre-existing durable queue.
     unique_suffix = uuid.uuid4().hex[:8]
-    unique_sentinel_name = f"mail_e2e_{unique_suffix}"  # no FK check — only for queue name
+    unique_sentinel_name = (
+        f"mail_e2e_{unique_suffix}"  # no FK check — only for queue name
+    )
 
     # Override the source's queue name via the sentinel_name param.
     source_unique = RabbitMQEventSource(

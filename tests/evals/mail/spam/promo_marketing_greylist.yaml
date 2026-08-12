@@ -1,0 +1,35 @@
+name: promo-marketing-greylist
+
+config_values:
+  spam_filter_enabled: true
+
+email:
+  id: "promo-001"
+  threadId: null
+  from:
+    - email: "deals@promos.shop-unlimited.example.com"
+  to:
+    - email: "me@example.com"
+  subject: "Exclusive offer — 80% off today only!"
+  preview: "Flash sale! Don't miss your chance to save big. Limited time offer."
+  receivedAt: "2026-08-10T09:00:00Z"
+  keywords: {}
+  headers:
+    - name: "org.apache.james.rspamd.status"
+      value: "action=greylist; score=4.2; required_score=5.0"
+    - name: "dkim-signature"
+      value: "v=1; a=rsa-sha256; d=promos.shop-unlimited.example.com; s=mail; ..."
+  hasAttachment: false
+
+fake_llm_outputs:
+  spam_check:
+    bucket: "spam"
+    confidence: 0.88
+    reason: "Promotional language, deceptive urgency, rspamd greylisted"
+
+expected:
+  # LLM is called because rspamd returned greylist (grey_zone=true).
+  # Accept any bucket in {spam, newsletter, none} — LLM-dependent.
+  bucket: null
+  llm_called: true
+  mission_emitted: false

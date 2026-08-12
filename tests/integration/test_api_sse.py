@@ -30,13 +30,20 @@ pytestmark = pytest.mark.skipif(not _reachable(), reason="twaky-pg not reachable
 
 @pytest.mark.asyncio
 async def test_sse_delivers_mission_changed_end_to_end(monkeypatch):
-    """POST /missions in one task; consume /events in another; assert event received."""
+    """POST /missions in one task; consume /events in another; assert event received.
+
+    Note: monkeypatch.setenv does NOT update the already-instantiated
+    pydantic-settings singleton — patch the ``settings`` object directly
+    for twaky_owner_email so ``require_owner()`` matches "alice@x". The
+    API_SESSION_SECRET stays live because sign_session() reads the same
+    settings object at call time. See flake #4 in
+    docs/superpowers/investigations/2026-08-10-nine-flakes.md.
+    """
     from twaky.api.main import app
     from twaky.api.session import SESSION_COOKIE_NAME, sign_session
     from twaky.api.sse.broker import SSEBroker
 
-    monkeypatch.setenv("API_SESSION_SECRET", "test-secret-32bytes-min-abcdefgh")
-    monkeypatch.setenv("TWAKY_OWNER_EMAIL", "alice@x")
+    monkeypatch.setattr(settings, "twaky_owner_email", "alice@x")
 
     cookie = sign_session("alice@x")
 

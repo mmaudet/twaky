@@ -36,6 +36,8 @@ class MailAgentState(TypedDict, total=False):
     actions_applied: list[str]
     started_at: float
     llm_calls: int
+    spam_bucket: str | None
+    spam_decision_id: UUID | None
 
 
 __all__ = ["MailAgentState", "ThreadStatus"]

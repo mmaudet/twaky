@@ -29,8 +29,12 @@ pytestmark = pytest.mark.skipif(not _reachable(), reason="twaky-pg not reachable
 
 @pytest.mark.asyncio
 async def test_declare_list_detail_cancel_cycle(monkeypatch):
-    monkeypatch.setenv("API_SESSION_SECRET", "test-secret-32bytes-min-abcdefgh")
-    monkeypatch.setenv("TWAKY_OWNER_EMAIL", "alice@x")
+    # monkeypatch.setenv doesn't touch the already-instantiated pydantic-
+    # settings singleton — patch the object directly so require_owner()'s
+    # session["email"] check compares against "alice@x" (not the real
+    # owner email). api_session_secret stays live because sign_session()
+    # and the SessionMiddleware both read the same settings object.
+    monkeypatch.setattr(settings, "twaky_owner_email", "alice@x")
 
     from twaky.api.main import app
 

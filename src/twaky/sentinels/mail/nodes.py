@@ -15,9 +15,12 @@ import fnmatch
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
+from twaky.config import settings
 from twaky.sentinels.mail.adapter import MailAdapter
 from twaky.sentinels.mail.llm.hardening import Hardening
 from twaky.sentinels.mail.llm.invoke import structured_call
@@ -25,18 +28,21 @@ from twaky.sentinels.mail.llm.tiers import UseCase
 from twaky.sentinels.mail.prompts.draft_reply import draft_reply_prompt
 from twaky.sentinels.mail.prompts.memories import select_memories_prompt
 from twaky.sentinels.mail.prompts.rules import choose_rule_prompt, learn_pattern_prompt
+from twaky.sentinels.mail.prompts.spam_check import spam_check_prompt
 from twaky.sentinels.mail.prompts.thread_status import thread_status_prompt
 from twaky.sentinels.mail.schemas import (
     ChooseRuleOutput,
     DraftReplyOutput,
     LearnPatternOutput,
     SelectMemoriesOutput,
+    SpamCheckOutput,
     ThreadStatusOutput,
 )
 from twaky.sentinels.mail.state import MailAgentState, ThreadStatus
 from twaky.sentinels.mail.store import learned_patterns as lp_store
 from twaky.sentinels.mail.store import memories as mem_store
 from twaky.sentinels.mail.store import rules as rules_store
+from twaky.sentinels.mail.store import spam_decisions
 
 if TYPE_CHECKING:
     from twaky.sentinels.base import Context
@@ -676,6 +682,56 @@ def make_select_memories(
     return _node
 
 
+def _build_reply_quote(latest: dict[str, Any], language: str) -> str:
+    """Format the original message as a quoted block for the reply body.
+
+    Follows the widely-accepted mail-client convention: an attribution line
+    (``On <date>, <sender> wrote:``) followed by each line of the original
+    body prefixed with ``> ``. Localised to French when ``language == "fr"``.
+    Empty body → returns the attribution line only.
+    """
+    from_list: list[dict[str, str]] = latest.get("from") or []
+    sender_display = ""
+    if from_list:
+        sender_display = str(from_list[0].get("name") or "").strip() or str(
+            from_list[0].get("email") or ""
+        )
+    received = str(latest.get("receivedAt") or "").split("T")[0]
+    if language.lower().startswith("fr"):
+        attribution = (
+            f"Le {received}, {sender_display} a écrit :"
+            if received
+            else f"{sender_display} a écrit :"
+        )
+    else:
+        attribution = (
+            f"On {received}, {sender_display} wrote:"
+            if received
+            else f"{sender_display} wrote:"
+        )
+
+    # Extract the plain-text body from bodyValues.
+    body_text = ""
+    body_values = latest.get("bodyValues") or {}
+    text_body = latest.get("textBody") or []
+    if text_body and isinstance(text_body, list):
+        first_part_id = str(text_body[0].get("partId") or "")
+        part = body_values.get(first_part_id) or {}
+        body_text = str(part.get("value") or "")
+    # Fallback: any first value we can find.
+    if not body_text and body_values:
+        first = next(iter(body_values.values()))
+        body_text = str((first or {}).get("value") or "")
+    # Last-ditch fallback: preview.
+    if not body_text:
+        body_text = str(latest.get("preview") or "")
+
+    if not body_text.strip():
+        return attribution
+    quoted_lines = [f"> {ln}" if ln else ">" for ln in body_text.splitlines()]
+    return attribution + "\n" + "\n".join(quoted_lines)
+
+
 def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentState]:
     """Factory for the draft_reply node.
 
@@ -745,11 +801,91 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
             use_case=UseCase.DRAFT_REPLY,
         )
 
-        # Save draft
+        # --- Compute reply envelope from the message being replied to ---
+        # Reply-To wins over From per RFC 5322; falls back to From otherwise.
+        reply_target: list[dict[str, str]] = (
+            latest.get("replyTo") or latest.get("from") or []
+        )
+        # Reply-all CC = original To + Cc minus (owner + reply_target duplicates).
+        # Standard mail-client behaviour: keep every recipient in the loop.
+        owner_email_lc = (ctx.owner_email or "").lower()
+        reply_target_lc = {str(a.get("email", "")).lower() for a in reply_target}
+        cc_addr: list[dict[str, str]] = []
+        seen_cc: set[str] = set()
+        for src_field in ("to", "cc"):
+            for addr in latest.get(src_field) or []:
+                email_lc = str(addr.get("email", "")).lower()
+                if not email_lc or email_lc == owner_email_lc:
+                    continue
+                if email_lc in reply_target_lc or email_lc in seen_cc:
+                    continue
+                seen_cc.add(email_lc)
+                cc_addr.append(addr)
+        # RFC 5322 subject convention: "Re: <subject>" unless already prefixed.
+        original_subject = str(latest.get("subject") or "").strip()
+        reply_subject = (
+            original_subject
+            if original_subject.lower().startswith(("re:", "re :"))
+            else f"Re: {original_subject}"
+        )
+        # In-Reply-To + References must be the RFC 5322 Message-Id, NOT the
+        # JMAP email id. JMAP exposes it via the ``messageId`` property or the
+        # ``Message-ID`` header. We check both.
+        message_id_list: list[str] = latest.get("messageId") or []
+        original_message_id: str = ""
+        if message_id_list:
+            original_message_id = str(message_id_list[0])
+        else:
+            for h in latest.get("headers") or []:
+                if str(h.get("name", "")).lower() == "message-id":
+                    original_message_id = str(h.get("value", "")).strip("<> ")
+                    break
+        # References = existing References + Message-Id of parent (RFC 5322 §3.6.4)
+        prior_refs: list[str] = []
+        for h in latest.get("headers") or []:
+            if str(h.get("name", "")).lower() == "references":
+                # Space-separated <id> tokens per RFC 5322
+                prior_refs = [
+                    tok.strip("<> ")
+                    for tok in str(h.get("value", "")).split()
+                    if tok.strip("<> ")
+                ]
+                break
+        references = prior_refs + ([original_message_id] if original_message_id else [])
+        # From = the owner's identity. Prefer the configured display name;
+        # fall back to the local-part of the email.
+        owner_display = settings.twaky_owner_name or (
+            ctx.owner_email.split("@")[0] if ctx.owner_email else ""
+        )
+        from_addr = (
+            [{"name": owner_display, "email": ctx.owner_email}]
+            if ctx.owner_email
+            else []
+        )
+
+        # --- Compose the final body: LLM reply + signature + quoted original ---
+        # Post-append the configured signature — the LLM is instructed NOT to
+        # invent one but often does anyway; overriding here ensures the real
+        # signature (title, phone, legal notice) is always present.
+        final_body = out.body.rstrip()
+        signature = (settings.mail_sentinel_signature or "").strip()
+        if signature:
+            final_body = f"{final_body}\n\n{signature}"
+        # Quote the original message underneath (standard mail-client behaviour).
+        quoted = _build_reply_quote(latest, out.language)
+        if quoted:
+            final_body = f"{final_body}\n\n{quoted}"
+
+        # Save draft with the computed envelope + composed body
         draft_id = ctx.mail.save_draft(
-            in_reply_to=latest.get("id", ""),
-            body=out.body,
+            in_reply_to=original_message_id or latest.get("id", ""),
+            body=final_body,
             language=out.language,
+            from_addr=from_addr,
+            to_addr=reply_target,
+            cc_addr=cc_addr,
+            subject=reply_subject,
+            references=references,
         )
 
         # Emit mission with evidence
@@ -777,6 +913,375 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
     return _node
 
 
+# ---------------------------------------------------------------------------
+# make_spam_triage — 5-stage rspamd-first spam filter node (SP6c T6)
+# ---------------------------------------------------------------------------
+
+# Heuristic score thresholds
+_HEURISTIC_NEWSLETTER_MAX_SCORE = 5
+_HEURISTIC_GREY_MIN_SCORE = 4
+
+# Regex to parse rspamd action from org.apache.james.rspamd.status header
+_RSPAMD_ACTION_RE = re.compile(r"action=([\w\s]+?)(?:;|$)", re.IGNORECASE)
+
+
+def _parse_rspamd_status(headers: list[dict[str, Any]]) -> str | None:
+    """Parse the rspamd action from org.apache.james.rspamd.status header.
+
+    Returns the action string (lowercased, stripped) or None if the header
+    is absent or the action component is missing.
+    """
+    for h in headers:
+        if h.get("name", "").lower() == "org.apache.james.rspamd.status":
+            m = _RSPAMD_ACTION_RE.search(h.get("value", ""))
+            if m:
+                return m.group(1).strip().lower()
+    return None
+
+
+@dataclass
+class _HeuristicResult:
+    """Result of the header-based heuristic scoring."""
+
+    total_score: int
+    newsletter_signal: bool
+    summary: dict[str, Any] = field(default_factory=dict)
+
+
+def _header_heuristic_score(email: dict[str, Any]) -> _HeuristicResult:
+    """Compute a small integer heuristic score from email headers.
+
+    Score contributions:
+      +2  if both list-unsubscribe AND list-unsubscribe-post headers present
+      +3  if dkim-signature absent
+      +3  if return-path domain != from domain (sender mismatch)
+      +2  if hasAttachment AND dkim absent
+
+    ``newsletter_signal`` is set when both list-unsubscribe headers are present.
+    """
+    headers: list[dict[str, Any]] = email.get("headers") or []
+    # Build a lower-cased header-name → value dict (last value wins on dup)
+    h: dict[str, str] = {}
+    for hdr in headers:
+        name = hdr.get("name", "").lower()
+        if name:
+            h[name] = hdr.get("value", "")
+
+    list_unsub_present = "list-unsubscribe" in h and "list-unsubscribe-post" in h
+    dkim_present = "dkim-signature" in h
+    has_attachment = bool(email.get("hasAttachment", False))
+
+    # Extract from domain
+    from_list = email.get("from") or []
+    from_email = from_list[0].get("email", "") if from_list else ""
+    from_domain = from_email.split("@")[-1].lower() if "@" in from_email else ""
+
+    # Extract return-path domain
+    return_path_val = h.get("return-path", "")
+    rp_email = return_path_val.strip("<>").strip()
+    rp_domain = rp_email.split("@")[-1].lower() if "@" in rp_email else ""
+    return_path_mismatch = bool(from_domain and rp_domain and from_domain != rp_domain)
+
+    score = 0
+    if list_unsub_present:
+        score += 2
+    if not dkim_present:
+        score += 3
+    if return_path_mismatch:
+        score += 3
+    if has_attachment and not dkim_present:
+        score += 2
+
+    summary: dict[str, Any] = {
+        "list_unsubscribe": list_unsub_present,
+        "dkim_present": dkim_present,
+        "return_path_mismatch": return_path_mismatch,
+        "has_attachment": has_attachment,
+        "total_score": score,
+    }
+
+    return _HeuristicResult(
+        total_score=score,
+        newsletter_signal=list_unsub_present,
+        summary=summary,
+    )
+
+
+def _parse_iso(value: str | None) -> datetime:
+    """Parse an ISO 8601 string to a timezone-aware datetime.
+
+    Falls back to now(UTC) if the value is absent or unparseable.
+    Python 3.11+ natively parses the ``Z`` suffix so we do not replace it.
+    """
+    if not value:
+        return datetime.now(UTC)
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+    except (ValueError, AttributeError):
+        return datetime.now(UTC)
+
+
+def _terminate(
+    ctx: NodeContext,
+    email: dict[str, Any],
+    *,
+    bucket: str,
+    signal: str,
+    score: float | None,
+    reason: str,
+) -> MailAgentState:
+    """Apply adapter side-effects + persist spam decision + emit mission (phishing only).
+
+    Per spec §5.3:
+    - spam/phishing-alert: label __spam__ + set_keyword $junk=True
+    - newsletter: label newsletter + set_keyword nonjunk=True
+    - phishing-alert only: emit mission via mission_emitter
+
+    Returns the state dict triggering pipeline routing (END for spam/phishing-alert,
+    continue for newsletter).
+    """
+    email_id: str = email["id"]
+
+    if bucket in {"spam", "phishing-alert"}:
+        # Label + $junk keyword + move to the Junk mailbox (RFC 8621 role="junk").
+        # Bundle mailbox move with keywords in ONE Email/set for atomicity —
+        # otherwise a partial success could leave the mail labeled but still
+        # in INBOX, confusing both the user and any downstream filter.
+        # Restore (mail_sentinel_spam.py) uses the same generic
+        # ``resolve_role_mailbox_id`` helper to bring the mail back to INBOX.
+        ctx.mail.label(email_id, "__spam__")
+        actions_applied = ["label:__spam__", "keyword:$junk"]
+        junk_move_ok = False
+        try:
+            resolver = getattr(ctx.mail, "resolve_role_mailbox_id", None)
+            junk_id = resolver("junk") if callable(resolver) else None
+            if junk_id:
+                # Fetch current mailboxIds to know what to unset (typically INBOX).
+                current_email = ctx.mail.get_email(email_id)
+                current_mboxes: dict[str, bool] = current_email.get("mailboxIds") or {}
+                mbox_patches: dict[str, bool] = {
+                    mid: False for mid in current_mboxes if mid != junk_id
+                }
+                mbox_patches[junk_id] = True
+                ctx.mail.set_keywords_bulk(
+                    email_id,
+                    {"$junk": True},
+                    mailbox_patches=mbox_patches,
+                )
+                actions_applied.append(f"move:junk({junk_id})")
+                junk_move_ok = True
+        except Exception:
+            log.exception(
+                "spam_triage: failed to move email=%s to Junk mailbox — "
+                "falling back to $junk keyword only",
+                email_id,
+            )
+        if not junk_move_ok:
+            # Fallback: at least set the $junk keyword so client-side filters
+            # (Twake Mail, Thunderbird) can still route the mail.
+            ctx.mail.set_keyword(email_id, "$junk", True)
+    else:  # newsletter
+        ctx.mail.label(email_id, "newsletter")
+        ctx.mail.set_keyword(email_id, "nonjunk", True)
+        actions_applied = ["label:newsletter", "keyword:nonjunk"]
+
+    decision_id: UUID = spam_decisions.insert(
+        email_id=email_id,
+        thread_id=email.get("threadId"),
+        sender_email=_sender_email(email),
+        subject=email.get("subject", ""),
+        received_at=_parse_iso(email.get("receivedAt")),
+        bucket=bucket,
+        signal_source=signal,
+        score=score,
+        reason=reason,
+    )
+
+    if bucket == "phishing-alert":
+        preview = (email.get("preview") or "")[:500]
+        ctx.base.mission_emitter.emit(
+            intent_text=f"Phishing suspected: {email.get('subject', '(no subject)')}",
+            reason="phishing-alert bucket auto-archived by spam_triage",
+            artifact={
+                "kind": "phishing_alert",
+                "evidence": {
+                    "email_id": email_id,
+                    "sender": _sender_email(email),
+                    "reason": reason,
+                    "score": score,
+                    "spam_decision_id": str(decision_id),
+                },
+                "hints": {"body_preview": preview},
+            },
+        )
+
+    # Per spec §5.3: newsletter node returns only spam_bucket + spam_decision_id
+    # (pipeline continues; actions_applied would conflict with downstream nodes).
+    # Terminal buckets (spam, phishing-alert) include actions_applied to surface
+    # what the sentinel did (pipeline ends, no downstream node overwrites this).
+    if bucket == "newsletter":
+        return {
+            "spam_bucket": bucket,
+            "spam_decision_id": decision_id,
+        }
+    return {
+        "spam_bucket": bucket,
+        "spam_decision_id": decision_id,
+        "actions_applied": actions_applied,
+    }
+
+
+def make_spam_triage(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentState]:
+    """Factory for the spam_triage node.
+
+    Implements a 5-stage first-match-wins cascade to classify incoming mail
+    into one of three buckets (spam, phishing-alert, newsletter) or pass it
+    through (bucket=None).
+
+    Stage 1 — Trust upstream rspamd via JMAP keywords ($junk / nonjunk).
+    Stage 2 — Trust upstream rspamd via org.apache.james.rspamd.status header.
+    Stage 3 — Header heuristics (list-unsubscribe, DKIM, return-path mismatch).
+    Stage 4 — LLM grey-zone check (only if grey_zone=True from stages 2–3).
+    Stage 5 — Default pass-through.
+
+    Gate check (spec §5.5): if spam_filter_enabled=False in config_values,
+    returns {"spam_bucket": None} immediately — zero cost.
+
+    Parameters
+    ----------
+    ctx
+        Execution context with mail adapter, base context, and owner_email.
+
+    Returns
+    -------
+    Callable
+        A node function ``(MailAgentState) -> MailAgentState``.
+    """
+
+    def _node(state: MailAgentState) -> MailAgentState:
+        cfg = ctx.base.sentinel_row.config_values
+
+        # Gate check — FIRST, before any work (spec §5.5)
+        if not cfg.get("spam_filter_enabled", False):
+            return {"spam_bucket": None}
+
+        thread: list[dict[str, Any]] = state.get("thread") or []
+        if not thread:
+            return {"spam_bucket": None}
+
+        latest = thread[-1]
+
+        # ----------------------------------------------------------------
+        # Stage 1 — Trust upstream rspamd via JMAP keywords
+        # ----------------------------------------------------------------
+        kw: dict[str, Any] = latest.get("keywords") or {}
+        if kw.get("$junk"):
+            return _terminate(
+                ctx,
+                latest,
+                bucket="spam",
+                signal="rspamd_junk_keyword",
+                score=None,
+                reason="upstream rspamd marked $junk",
+            )
+        if kw.get("nonjunk"):
+            # rspamd said HAM — defer to it, no further checks, no DB row
+            return {"spam_bucket": None}
+
+        # ----------------------------------------------------------------
+        # Stage 2 — Trust upstream rspamd via org.apache.james.rspamd.status header
+        # ----------------------------------------------------------------
+        rspamd_action = _parse_rspamd_status(latest.get("headers") or [])
+        if rspamd_action in {"reject", "soft reject"}:
+            return _terminate(
+                ctx,
+                latest,
+                bucket="spam",
+                signal="rspamd_status_reject",
+                score=None,
+                reason=f"rspamd action={rspamd_action}",
+            )
+        if rspamd_action == "rewrite subject":
+            return _terminate(
+                ctx,
+                latest,
+                bucket="spam",
+                signal="rspamd_status_rewrite",
+                score=None,
+                reason="rspamd action=rewrite subject",
+            )
+        grey_zone = rspamd_action in {"add header", "greylist"}
+
+        # ----------------------------------------------------------------
+        # Stage 3 — Header heuristics
+        # ----------------------------------------------------------------
+        h = _header_heuristic_score(latest)
+        if h.newsletter_signal and h.total_score < _HEURISTIC_NEWSLETTER_MAX_SCORE:
+            return _terminate(
+                ctx,
+                latest,
+                bucket="newsletter",
+                signal="heuristic_newsletter",
+                score=None,
+                reason=f"list-unsubscribe present, heuristic score={h.total_score}",
+            )
+        if h.total_score >= _HEURISTIC_GREY_MIN_SCORE:
+            grey_zone = True
+
+        # ----------------------------------------------------------------
+        # Stage 4 — LLM grey-zone check (only if grey_zone=True)
+        # ----------------------------------------------------------------
+        if not grey_zone:
+            return {"spam_bucket": None}
+
+        # Build a compact headers summary string for the prompt
+        headers_summary_lines = [f"{k}: {v}" for k, v in h.summary.items()]
+        headers_summary = "\n".join(headers_summary_lines)
+
+        prompt = spam_check_prompt(
+            dict(state),
+            headers_summary=headers_summary,
+            rspamd_action=rspamd_action,
+            owner_email=ctx.owner_email,
+        )
+        out: SpamCheckOutput = structured_call(
+            prompt,
+            SpamCheckOutput,
+            hardening=Hardening.COMPACT,
+            use_case=UseCase.SPAM_CHECK,
+        )
+
+        spam_thresh = float(cfg.get("spam_llm_confidence_threshold", 0.85))
+        news_thresh = float(cfg.get("spam_llm_newsletter_threshold", 0.70))
+
+        if out.bucket in {"spam", "phishing-alert"} and out.confidence >= spam_thresh:
+            return _terminate(
+                ctx,
+                latest,
+                bucket=out.bucket,
+                signal="llm_grey_zone",
+                score=out.confidence,
+                reason=out.reason,
+            )
+        if out.bucket == "newsletter" and out.confidence >= news_thresh:
+            return _terminate(
+                ctx,
+                latest,
+                bucket="newsletter",
+                signal="llm_grey_zone",
+                score=out.confidence,
+                reason=out.reason,
+            )
+
+        # Stage 5 — default pass-through
+        return {"spam_bucket": None}
+
+    return _node
+
+
 __all__ = [
     "NodeContext",
     "make_apply_actions",
@@ -785,5 +1290,6 @@ __all__ = [
     "make_load_thread",
     "make_match_rules",
     "make_select_memories",
+    "make_spam_triage",
     "make_thread_status",
 ]

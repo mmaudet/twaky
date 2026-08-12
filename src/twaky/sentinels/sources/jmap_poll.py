@@ -45,6 +45,11 @@ from twaky.sentinels.sources.base import Ack, EventSource, _noop_ack
 log = logging.getLogger(__name__)
 
 _MAIL_CAPABILITY = "urn:ietf:params:jmap:mail"
+_CORE_CAPABILITY = "urn:ietf:params:jmap:core"
+# James JMAP requires clients to declare both `core` and `mail` capabilities in
+# the `using` array of every methodCall — missing `core` yields
+# "Missing capability(ies): urn:ietf:params:jmap:core" errors.
+_JMAP_USING = [_CORE_CAPABILITY, _MAIL_CAPABILITY]
 
 # Properties fetched for each new email.
 _EMAIL_PROPERTIES = [
@@ -55,7 +60,11 @@ _EMAIL_PROPERTIES = [
     "from",
     "to",
     "cc",
+    "replyTo",
     "subject",
+    "messageId",
+    "inReplyTo",
+    "references",
     "receivedAt",
     "preview",
     "textBody",
@@ -155,7 +164,7 @@ class JmapPollingEventSource(EventSource):
 
         # Step 2: mailbox list
         mailbox_body = {
-            "using": [_MAIL_CAPABILITY],
+            "using": _JMAP_USING,
             "methodCalls": [
                 [
                     "Mailbox/get",
@@ -206,21 +215,23 @@ class JmapPollingEventSource(EventSource):
         account_id: str,
         inbox_id: str,
     ) -> str:
-        """Capture the current queryState via Email/query (no full listing).
+        """Capture the current Email/get state (no full listing).
 
-        Returns the ``queryState`` string to be persisted as the initial
-        ``sinceState`` for the first delta poll.
+        Email/changes requires ``sinceState`` in the same UUID format that
+        Email/get returns as ``state`` — this is distinct from Email/query's
+        ``queryState`` (an opaque hex string in James JMAP that Email/changes
+        rejects with "error.expected.uuid"). Calling Email/get with ids=[]
+        avoids pulling any content while returning the current mail collection
+        state suitable for Email/changes.
         """
         body = {
-            "using": [_MAIL_CAPABILITY],
+            "using": _JMAP_USING,
             "methodCalls": [
                 [
-                    "Email/query",
+                    "Email/get",
                     {
                         "accountId": account_id,
-                        "filter": {"inMailbox": inbox_id},
-                        "limit": 1,
-                        "calculateTotal": False,
+                        "ids": [],
                     },
                     "0",
                 ]
@@ -230,9 +241,9 @@ class JmapPollingEventSource(EventSource):
         resp = await client.post(api_url, json=body, headers=headers)
         resp.raise_for_status()
         data = resp.json()
-        query_state: str = data["methodResponses"][0][1]["queryState"]
-        log.info("jmap_poll: seeded queryState=%s", query_state)
-        return query_state
+        state: str = data["methodResponses"][0][1]["state"]
+        log.info("jmap_poll: seeded state=%s", state)
+        return state
 
     async def _poll_changes(
         self,
@@ -243,7 +254,7 @@ class JmapPollingEventSource(EventSource):
     ) -> tuple[str, list[str]]:
         """Run Email/changes.  Return ``(newState, created_ids)``."""
         body = {
-            "using": [_MAIL_CAPABILITY],
+            "using": _JMAP_USING,
             "methodCalls": [
                 [
                     "Email/changes",
@@ -274,7 +285,7 @@ class JmapPollingEventSource(EventSource):
     ) -> list[dict[str, Any]]:
         """Run Email/get for *ids*.  Return the list of email objects."""
         body = {
-            "using": [_MAIL_CAPABILITY],
+            "using": _JMAP_USING,
             "methodCalls": [
                 [
                     "Email/get",

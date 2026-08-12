@@ -1087,6 +1087,182 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthStatus'
+  /mail-sentinel/spam:
+    get:
+      tags:
+      - mail-sentinel-spam
+      summary: List Spam
+      description: 'Return recent spam decisions ordered by decided_at DESC.
+
+
+        Optionally filter by ``bucket`` (``spam``, ``newsletter``,
+
+        ``phishing-alert``) and/or cursor ``before`` (ISO-8601 datetime).
+
+        ``limit`` is bounded 1..500, defaulting to 50.'
+      operationId: list_spam_mail_sentinel_spam_get
+      parameters:
+      - name: bucket
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Bucket
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: before
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Before
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SpamDecision'
+                title: Response List Spam Mail Sentinel Spam Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/spam/{decision_id}/restore:
+    post:
+      tags:
+      - mail-sentinel-spam
+      summary: Restore
+      description: "Restore a spam-archived email to the inbox.\n\nJMAP-first two-phase:\
+        \ patches keywords on the JMAP server before touching\nthe DB, so a JMAP failure\
+        \ leaves state consistent (DB not modified).\n\nError codes\n-----------\n\
+        404 spam_decision_not_found\n    No decision row with the given id.\n409 already_restored\n\
+        \    The decision was already restored.\n502 jmap_restore_failed\n    JMAP\
+        \ server returned an error; DB was not modified."
+      operationId: restore_mail_sentinel_spam__decision_id__restore_post
+      parameters:
+      - name: decision_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Decision Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpamDecision'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/spam/stats:
+    get:
+      tags:
+      - mail-sentinel-spam
+      summary: Get Stats
+      description: 'Return aggregated spam decision counts for the last ``days`` days.
+
+
+        Returns counts for ``spam``, ``newsletter``, ``phishing_alert``,
+
+        ``restored``, and ``total_processed`` buckets.'
+      operationId: get_stats_mail_sentinel_spam_stats_get
+      parameters:
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 3650
+          minimum: 1
+          default: 30
+          title: Days
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpamStats'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/runs:
+    get:
+      tags:
+      - mail-sentinel-runs
+      summary: List Mail Runs
+      description: 'List the N most recent mail-pipeline runs, newest first.
+
+
+        Each row includes the base ``sentinel_run`` fields plus the linked
+
+        ``mail_sentinel_spam_decision`` (bucket + signal_source) when the
+
+        ``spam_triage`` node classified this email. Uses the ``event_ref``
+
+        on the run (which is the JMAP email id) as the join key.'
+      operationId: list_mail_runs_mail_sentinel_runs_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: before
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Before
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MailSentinelRun'
+                title: Response List Mail Runs Mail Sentinel Runs Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     Agent:
@@ -1567,6 +1743,80 @@ components:
       - condition_count
       title: MailRuleSummary
       description: Shallow representation used in the rules list endpoint.
+    MailSentinelRun:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        email_id:
+          type: string
+          title: Email Id
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        duration_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Ms
+        outcome:
+          type: string
+          title: Outcome
+        mission_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Mission Id
+        llm_calls:
+          type: integer
+          title: Llm Calls
+        error_repr:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Repr
+        spam_bucket:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Spam Bucket
+        spam_signal_source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Spam Signal Source
+        spam_decision_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Spam Decision Id
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - email_id
+      - started_at
+      - completed_at
+      - duration_ms
+      - outcome
+      - mission_id
+      - llm_calls
+      - error_repr
+      - spam_bucket
+      - spam_signal_source
+      - spam_decision_id
+      title: MailSentinelRun
+      description: One mail_sentinel run row + resolved spam decision (if any).
     Mission:
       properties:
         id:
@@ -2142,6 +2392,106 @@ components:
       title: SkillUpdate
       description: Partial update. All fields optional; empty body → 422 (enforced
         in router).
+    SpamDecision:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        email_id:
+          type: string
+          title: Email Id
+        thread_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Thread Id
+        sender_email:
+          type: string
+          title: Sender Email
+        subject:
+          type: string
+          title: Subject
+        received_at:
+          type: string
+          format: date-time
+          title: Received At
+        bucket:
+          type: string
+          title: Bucket
+        signal_source:
+          type: string
+          title: Signal Source
+        score:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Score
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+        restored_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Restored At
+        restored_by:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Restored By
+        decided_at:
+          type: string
+          format: date-time
+          title: Decided At
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - email_id
+      - thread_id
+      - sender_email
+      - subject
+      - received_at
+      - bucket
+      - signal_source
+      - score
+      - reason
+      - restored_at
+      - restored_by
+      - decided_at
+      title: SpamDecision
+      description: Full representation of a mail_sentinel_spam_decision row.
+    SpamStats:
+      properties:
+        spam:
+          type: integer
+          title: Spam
+        newsletter:
+          type: integer
+          title: Newsletter
+        phishing_alert:
+          type: integer
+          title: Phishing Alert
+        restored:
+          type: integer
+          title: Restored
+        total_processed:
+          type: integer
+          title: Total Processed
+      additionalProperties: false
+      type: object
+      required:
+      - spam
+      - newsletter
+      - phishing_alert
+      - restored
+      - total_processed
+      title: SpamStats
+      description: Aggregated counts for the /mail-sentinel/spam/stats endpoint.
     Stats24h:
       properties:
         total:

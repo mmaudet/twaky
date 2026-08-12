@@ -14,6 +14,7 @@ from twaky.sentinels.mail.schemas import (
     ExtractMemoriesOutput,
     LearnPatternOutput,
     SelectMemoriesOutput,
+    SpamCheckOutput,
     ThreadStatusOutput,
 )
 from twaky.sentinels.mail.state import ThreadStatus
@@ -384,3 +385,93 @@ class TestExtractMemoriesOutput:
         output = ExtractMemoriesOutput(memories=[memory])
         assert len(output.memories) == 1
         assert output.memories[0].kind == "procedure"
+
+
+class TestSpamCheckOutput:
+    """Tests for SpamCheckOutput schema."""
+
+    def test_spam_check_output_happy(self) -> None:
+        """Assert valid SpamCheckOutput with bucket='spam'."""
+        output = SpamCheckOutput(
+            bucket="spam",
+            confidence=0.9,
+            reason="Matched spam pattern",
+        )
+        assert output.bucket == "spam"
+        assert output.confidence == 0.9
+        assert output.reason == "Matched spam pattern"
+
+    def test_spam_check_output_all_buckets(self) -> None:
+        """Assert all bucket literal values are accepted."""
+        for bucket in ["spam", "newsletter", "phishing-alert", "none"]:
+            output = SpamCheckOutput(
+                bucket=bucket,  # type: ignore
+                confidence=0.5,
+                reason="Test reason",
+            )
+            assert output.bucket == bucket
+
+    def test_spam_check_output_rejects_bad_bucket(self) -> None:
+        """Assert bucket='junk' raises ValidationError."""
+        with pytest.raises(ValidationError):
+            SpamCheckOutput(
+                bucket="junk",  # type: ignore
+                confidence=0.5,
+                reason="Invalid bucket",
+            )
+
+    def test_spam_check_output_confidence_bounds(self) -> None:
+        """Assert confidence accepts 0.0 and 1.0."""
+        output1 = SpamCheckOutput(
+            bucket="none",
+            confidence=0.0,
+            reason="Min confidence",
+        )
+        assert output1.confidence == 0.0
+
+        output2 = SpamCheckOutput(
+            bucket="none",
+            confidence=1.0,
+            reason="Max confidence",
+        )
+        assert output2.confidence == 1.0
+
+    def test_spam_check_output_confidence_above_1(self) -> None:
+        """Assert confidence > 1.0 raises ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            SpamCheckOutput(
+                bucket="spam",
+                confidence=1.5,
+                reason="Over 1.0",
+            )
+        assert "less than or equal to 1" in str(exc_info.value).lower()
+
+    def test_spam_check_output_confidence_below_0(self) -> None:
+        """Assert confidence < 0.0 raises ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            SpamCheckOutput(
+                bucket="spam",
+                confidence=-0.1,
+                reason="Below 0.0",
+            )
+        assert "greater than or equal to 0" in str(exc_info.value).lower()
+
+    def test_spam_check_output_reason_max_400(self) -> None:
+        """Assert reason > 400 chars raises ValidationError."""
+        long_reason = "x" * 401
+        with pytest.raises(ValidationError):
+            SpamCheckOutput(
+                bucket="spam",
+                confidence=0.8,
+                reason=long_reason,
+            )
+
+    def test_spam_check_output_reason_at_limits(self) -> None:
+        """Assert reason of exactly 400 chars is accepted."""
+        reason_400 = "x" * 400
+        output = SpamCheckOutput(
+            bucket="spam",
+            confidence=0.8,
+            reason=reason_400,
+        )
+        assert len(output.reason) == 400

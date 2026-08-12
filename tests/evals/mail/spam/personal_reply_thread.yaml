@@ -1,0 +1,32 @@
+name: personal-reply-thread
+
+config_values:
+  spam_filter_enabled: true
+
+# A 3-message thread between owner and a contact.
+# The latest email is a reply from the contact; thread_continuation → bucket=none.
+email:
+  id: "thread-003"
+  threadId: "thread-personal-001"
+  from:
+    - email: "alice@contact.example.com"
+  to:
+    - email: "me@example.com"
+  subject: "Re: Re: Lunch plans Friday?"
+  preview: "Sounds great, see you at noon!"
+  receivedAt: "2026-08-10T12:30:00Z"
+  keywords:
+    nonjunk: true
+  headers:
+    - name: "dkim-signature"
+      value: "v=1; a=rsa-sha256; d=contact.example.com; s=mail; ..."
+    - name: "return-path"
+      value: "<alice@contact.example.com>"
+  hasAttachment: false
+
+fake_llm_outputs: {}
+
+expected:
+  bucket: "none"
+  llm_called: false
+  mission_emitted: false
