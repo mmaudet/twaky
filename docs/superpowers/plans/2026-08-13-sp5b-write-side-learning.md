@@ -141,6 +141,12 @@ def test_alters_mail_sentinel_memory_with_four_columns():
         assert expected in text, f"missing: {expected!r}"
 
 
+def test_drops_not_null_on_expires_at():
+    """`expires_at` must be nullable so 'Keep permanent' can set it to NULL."""
+    text = SCRIPT.read_text()
+    assert "ALTER COLUMN expires_at DROP NOT NULL" in text
+
+
 def test_source_check_constraint():
     text = SCRIPT.read_text()
     assert "source IN ('manual','auto_diff','auto_reclass','auto_move')" in text
@@ -210,6 +216,10 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-twa
         REFERENCES public.mission(id) ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS confidence NUMERIC(3,2)
         CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1));
+
+    -- Allow "Keep permanent" memories: expires_at can now be NULL
+    ALTER TABLE public.mail_sentinel_memory
+      ALTER COLUMN expires_at DROP NOT NULL;
 
     CREATE INDEX IF NOT EXISTS mail_sentinel_memory_by_source
       ON public.mail_sentinel_memory (source, created_at DESC);
@@ -3016,7 +3026,7 @@ git commit -m "feat(sp5b): adapter mailbox+changes methods + poll-loop wiring"
 
 ---
 
-### Task 12: Nodes — retrieve_memories ranking + match_rules branches
+### Task 12: Nodes — select_memories ranking + match_rules branches
 
 **Files:**
 - Modify: `src/twaky/sentinels/mail/nodes.py` (two nodes)
@@ -3025,7 +3035,7 @@ git commit -m "feat(sp5b): adapter mailbox+changes methods + poll-loop wiring"
 **Interfaces:**
 - Consumes: `memories.list_for_prompt`, `memories.touch`, `learned_patterns.by_sender`
 - Produces:
-  - `retrieve_memories` now uses ranked query, calls `touch()` on returned IDs
+  - `select_memories` now uses ranked query, calls `touch()` on returned IDs
   - `match_rules` gains 3 branches for active learned_pattern with rule_name `label:*`, `trust_sender`, `block_sender`
 
 - [ ] **Step 1: Write failing integration test**
@@ -3033,18 +3043,32 @@ git commit -m "feat(sp5b): adapter mailbox+changes methods + poll-loop wiring"
 Create `tests/sentinels/mail/test_nodes_write_side_integration.py`:
 
 ```python
-"""Integration: retrieve_memories ranks + touches, match_rules short-circuits patterns."""
+"""Integration: select_memories ranks + touches, match_rules short-circuits patterns."""
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
-from twaky.sentinels.mail.nodes import make_match_rules, make_retrieve_memories
+from twaky.sentinels.mail.nodes import (
+    NodeContext,
+    make_match_rules,
+    make_select_memories,
+)
 from twaky.sentinels.mail.store import learned_patterns as lp
 from twaky.sentinels.mail.store import memories as mem
 
 
 pytestmark = pytest.mark.integration
+
+
+def _build_ctx(*, owner_email: str = "mmaudet@linagora.com", memory_inject_max: int = 16) -> NodeContext:
+    """Build a NodeContext with mocked base + mail — enough for these unit-level integration tests."""
+    base = MagicMock()
+    base.sentinel_row.config_values = {"memory_inject_max": memory_inject_max}
+    mail = MagicMock()
+    return NodeContext(base=base, mail=mail, owner_email=owner_email)
 
 
 @pytest.fixture(autouse=True)
@@ -3056,52 +3080,65 @@ def _cleanup():
     yield
 
 
-def test_match_rules_short_circuits_on_label_pattern(monkeypatch):
-    # 3 samples to reach activation
+def test_match_rules_short_circuits_on_label_pattern():
     for _ in range(3):
         lp.record_decision(
             sender_email="c@x.com", rule_name="label:Facturation", confidence_hint=0.95
         )
-    # Fake NodeContext + state
-    from twaky.sentinels.mail.state import MailAgentState
-    from twaky.sentinels.mail.nodes import NodeContext
-
-    ctx = NodeContext(owner_email="mmaudet@linagora.com")  # adjust if constructor differs
-    state: MailAgentState = {  # type: ignore[typeddict-item]
-        "thread": [{"from": [{"email": "c@x.com"}], "subject": "s", "textBody": "b"}]
+    ctx = _build_ctx()
+    state = {
+        "email_id": "e1",
+        "thread": [{"from": [{"email": "c@x.com"}], "subject": "s", "textBody": "b"}],
     }
     node = make_match_rules(ctx)
-    result = node(state)
+    result = node(state)  # type: ignore[arg-type]
     assert result.get("matched_by") == "learned_pattern"
     assert result.get("rule_name") == "label:Facturation"
 
 
-def test_retrieve_memories_touches_returned_ids():
+def test_match_rules_short_circuits_on_trust_sender():
+    for _ in range(3):
+        lp.record_decision(
+            sender_email="legit@x.com", rule_name="trust_sender", confidence_hint=0.95
+        )
+    ctx = _build_ctx()
+    state = {
+        "email_id": "e1",
+        "thread": [{"from": [{"email": "legit@x.com"}], "subject": "s", "textBody": "b"}],
+    }
+    result = make_match_rules(ctx)(state)  # type: ignore[arg-type]
+    assert result.get("matched_by") == "learned_pattern"
+    assert result.get("rule_name") == "trust_sender"
+    assert result.get("skip_spam_triage") is True
+
+
+def test_select_memories_touches_returned_ids():
     from datetime import datetime, timezone
     from twaky.db import get_pool
     m = mem.insert(
         kind="preference", scope="sender", scope_value="a@x.com",
         content="x", source="auto_diff", sender_email="a@x.com", confidence=0.9,
     )
+    assert m is not None
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE mail_sentinel_memory SET expires_at = now() + INTERVAL '1 day' WHERE id = %s",
             (m.id,),
         )
 
-    from twaky.sentinels.mail.nodes import NodeContext
-    ctx = NodeContext(owner_email="mmaudet@linagora.com")
-    from twaky.sentinels.mail.state import MailAgentState
-    state: MailAgentState = {  # type: ignore[typeddict-item]
-        "thread": [{"from": [{"email": "a@x.com"}]}]
+    ctx = _build_ctx()
+    state = {
+        "email_id": "e1",
+        "thread": [{"from": [{"email": "a@x.com"}]}],
     }
-    node = make_retrieve_memories(ctx)
-    out = node(state)
+    node = make_select_memories(ctx)
+    out = node(state)  # type: ignore[arg-type]
     assert "memories" in out
 
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT expires_at FROM mail_sentinel_memory WHERE id=%s", (m.id,))
         row = cur.fetchone()
+    assert row is not None
     delta = row[0] - datetime.now(timezone.utc)
     assert delta.days >= 6
 ```
@@ -3113,27 +3150,33 @@ pytest tests/sentinels/mail/test_nodes_write_side_integration.py -v
 ```
 Expected: FAIL (nodes not yet updated).
 
-- [ ] **Step 3: Update `retrieve_memories` node in `src/twaky/sentinels/mail/nodes.py`**
+- [ ] **Step 3: Update `select_memories` node in `src/twaky/sentinels/mail/nodes.py`**
 
-Find `make_retrieve_memories` (grep for it). Replace the query body with `mem_store.list_for_prompt(...)` and call `mem_store.touch(...)` on the returned IDs. Exact edit depends on existing structure; the pattern is:
+Find `make_select_memories` at `src/twaky/sentinels/mail/nodes.py:599`. Replace the pool query body with `mem_store.list_for_prompt(...)` and call `mem_store.touch(...)` on the returned IDs. Preserve the existing config lookup pattern via `ctx.base.sentinel_row.config_values.get("memory_inject_max", 16)` — the config key is stored on the sentinel row, not in `settings`.
+
+Inside the `_node(state)` function of `make_select_memories`:
 
 ```python
-# Inside _node(state):
 thread = state.get("thread") or []
 if not thread:
     return {"memories": []}
 sender = _sender_email(thread[-1])
-domain = sender.split("@")[-1] if "@" in sender else ""
+domain = sender.split("@", 1)[-1] if "@" in sender else ""
+max_inject = ctx.base.sentinel_row.config_values.get("memory_inject_max", 16)
 memories = mem_store.list_for_prompt(
     sender_email=sender,
     sender_domain=domain,
-    limit=settings.mail_sentinel_memory_inject_max,
+    limit=max_inject,
 )
 mem_store.touch([m.id for m in memories])
-return {"memories": [{"id": str(m.id), "content": m.content} for m in memories]}
+return {
+    "memories": [
+        {"id": str(m.id), "content": m.content} for m in memories
+    ]
+}
 ```
 
-Adjust `settings.mail_sentinel_memory_inject_max` if a different config key is used (grep `memory_inject_max`).
+Retain any preexisting logging in the node. Note that the existing implementation used `candidate_pool()` — the new path replaces that call entirely for the injection scenario, but `candidate_pool` remains in the store module for other callers.
 
 - [ ] **Step 4: Update `match_rules` node in `src/twaky/sentinels/mail/nodes.py`**
 
@@ -3898,7 +3941,7 @@ git commit -m "feat(sp5b): eval fixtures + progressive rollout playbook"
 - Goal §2.5 (best-effort, never blocks ingest) → Tasks 10, 11 (try/except around observer)
 - Goal §2.6 (feature flag) → Task 1
 
-**Non-goal §3** (no autonomous sending, no federation, no webhook, no `retrieve_memories` rewrite) → respected across all tasks.
+**Non-goal §3** (no autonomous sending, no federation, no webhook, no `select_memories` rewrite) → respected across all tasks.
 
 **Schema §8** — Task 2 delivers 4 columns + 2 tables. Spec mentions Alembic; codebase reality is bash script `sql/NNN_init_*.sh` — plan updated accordingly and this deviation is called out in the plan header.
 
