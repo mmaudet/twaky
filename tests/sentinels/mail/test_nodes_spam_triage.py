@@ -569,6 +569,142 @@ class TestHeuristicImprovements:
         assert result.summary["random_local"] is True
 
 
+class TestBrandImpersonation:
+    """Brand-impersonation heuristic (2026-08-13): detects paypal/bank/carrier
+    mention combined with a mismatched sender domain OR urgency phrasing,
+    and forces the LLM grey-zone even for high-DKIM / low-rspamd mail.
+
+    Motivated by the persistent false-negative on ``service@updates.paypal.com
+    · Votre compte PayPal sera fermé`` — DKIM valid + domain looks like
+    paypal but the pattern is textbook phishing.
+    """
+
+    def test_paypal_urgency_pattern_fires(self) -> None:
+        """PayPal legit-looking domain + urgency phrase → impersonation signal."""
+        from twaky.sentinels.mail.nodes import _brand_impersonation_signal
+
+        email = {
+            "from": [{"email": "service@updates.paypal.com", "name": "PayPal"}],
+            "subject": "Votre compte PayPal sera fermé",
+            "preview": "Merci de confirmer vos informations sous 24h.",
+        }
+        fires, reason = _brand_impersonation_signal(email)
+        assert fires is True
+        assert "paypal" in reason
+        assert "sera fermé" in reason
+
+    def test_paypal_from_wrong_domain_fires(self) -> None:
+        """PayPal brand mention + non-paypal sender domain → impersonation."""
+        from twaky.sentinels.mail.nodes import _brand_impersonation_signal
+
+        email = {
+            "from": [{"email": "security@random-alert.tk", "name": "PayPal"}],
+            "subject": "Account security notice",
+            "preview": "",
+        }
+        fires, reason = _brand_impersonation_signal(email)
+        assert fires is True
+        assert "domain mismatch" in reason
+
+    def test_amazon_legit_domain_no_urgency_does_not_fire(self) -> None:
+        """Real Amazon order confirmation → no impersonation signal."""
+        from twaky.sentinels.mail.nodes import _brand_impersonation_signal
+
+        email = {
+            "from": [{"email": "auto-confirm@amazon.fr", "name": "Amazon.fr"}],
+            "subject": "Votre commande a été expédiée",
+            "preview": "Votre colis arrivera demain.",
+        }
+        fires, _ = _brand_impersonation_signal(email)
+        assert fires is False
+
+    def test_no_brand_mention_does_not_fire(self) -> None:
+        from twaky.sentinels.mail.nodes import _brand_impersonation_signal
+
+        email = {
+            "from": [{"email": "team@example.com", "name": "Random Team"}],
+            "subject": "Quick question",
+            "preview": "Hello, can we chat?",
+        }
+        fires, _ = _brand_impersonation_signal(email)
+        assert fires is False
+
+    def test_bank_urgency_fires(self) -> None:
+        """BNP brand mention + urgency phrasing → impersonation."""
+        from twaky.sentinels.mail.nodes import _brand_impersonation_signal
+
+        email = {
+            "from": [{"email": "alert@bnp-secure.info", "name": "BNP"}],
+            "subject": "Action requise sur votre compte",
+            "preview": "Vérifier votre compte immédiatement.",
+        }
+        fires, _reason = _brand_impersonation_signal(email)
+        assert fires is True
+
+    def test_delivery_scam_fires(self) -> None:
+        """Colissimo mention on non-Colissimo domain → impersonation."""
+        from twaky.sentinels.mail.nodes import _brand_impersonation_signal
+
+        email = {
+            "from": [{"email": "no-reply@random.tk", "name": "Colissimo"}],
+            "subject": "Notification de livraison — colis bloqué",
+            "preview": "Cliquez ici pour re-programmer la livraison.",
+        }
+        fires, _reason = _brand_impersonation_signal(email)
+        assert fires is True
+
+    def test_subdomain_of_legit_matches(self) -> None:
+        """``updates.paypal.com`` is a subdomain of ``paypal.com`` → domain OK.
+
+        Without urgency, no signal (domain OK, no urgency).
+        """
+        from twaky.sentinels.mail.nodes import _brand_impersonation_signal
+
+        email = {
+            "from": [{"email": "news@updates.paypal.com", "name": "PayPal"}],
+            "subject": "Nouvelle promotion PayPal",
+            "preview": "Découvrez nos avantages.",
+        }
+        fires, _ = _brand_impersonation_signal(email)
+        assert fires is False
+
+    def test_pipeline_wires_brand_signal_into_grey_zone(self) -> None:
+        """Full pipeline: brand impersonation forces LLM call and taints reason."""
+        ctx = _ctx()
+        email = _email(
+            keywords={"nonjunk": True},  # rspamd trusts it, would normally pass
+            headers=[
+                {"name": "dkim-signature", "value": "v=1; a=rsa-sha256"},
+                {
+                    "name": "org.apache.james.rspamd.status",
+                    "value": "No, actions=no action score=0.0 requiredScore=12.0",
+                },
+            ],
+            sender="service@updates.paypal.com",
+            subject="Votre compte PayPal sera fermé",
+            preview="Merci de confirmer vos informations sous 24h.",
+        )
+        node = make_spam_triage(ctx)
+
+        # LLM returns phishing-alert with high confidence
+        llm_out = SpamCheckOutput(
+            bucket="phishing-alert",
+            confidence=0.90,
+            reason="account-closure urgency pattern",
+        )
+        with patch(
+            "twaky.sentinels.mail.nodes.structured_call", return_value=llm_out
+        ) as mock_llm:
+            result = node(_state(email))  # type: ignore[arg-type]
+
+        # Brand signal forced LLM despite nonjunk + score 0 + DKIM
+        mock_llm.assert_called_once()
+        # LLM prompt should carry the brand signal for context
+        prompt_arg = mock_llm.call_args[0][0]
+        assert "brand_impersonation" in prompt_arg
+        assert result["spam_bucket"] == "phishing-alert"
+
+
 class TestSpamTriageStage3:
     def test_stage3_newsletter_heuristic_labels(self) -> None:
         """Stage 3: list-unsubscribe present + score < 5 → bucket=newsletter, no LLM.
