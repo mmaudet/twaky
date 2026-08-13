@@ -22,6 +22,9 @@ class UseCase(str, Enum):
     EXTRACT_MEMORIES = "extract_memories"
     DRAFT_REPLY = "draft_reply"
     SPAM_CHECK = "spam_check"
+    # SP5b extractors
+    EXTRACT_MEMORY_DIFF = "extract_memory_diff"
+    EXTRACT_MEMORY_MOVE = "extract_memory_move"
 
 
 _MAPPING: dict[UseCase, Tier] = {
@@ -32,6 +35,8 @@ _MAPPING: dict[UseCase, Tier] = {
     UseCase.EXTRACT_MEMORIES: Tier.ECONOMY,
     UseCase.DRAFT_REPLY: Tier.DRAFT,
     UseCase.SPAM_CHECK: Tier.ECONOMY,
+    UseCase.EXTRACT_MEMORY_DIFF: Tier.CHAT,
+    UseCase.EXTRACT_MEMORY_MOVE: Tier.ECONOMY,
 }
 
 
