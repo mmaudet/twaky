@@ -31,9 +31,9 @@ import {
     AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { useMailRules, useDeleteMailRule, type MailRuleSummary } from '@/hooks/use-mail-sentinel-rules'
-import { useMailMemories, type MailMemorySummary } from '@/hooks/use-mail-sentinel-memories'
+import { useMailMemories, usePatchMailMemory, useForgetMailMemory, type MailMemorySummary } from '@/hooks/use-mail-sentinel-memories'
 import { useMailPatterns, useForgetMailPattern, type LearnedPatternSummary } from '@/hooks/use-mail-sentinel-patterns'
-import { useMailObservations, usePatchMailMemory, useForgetMailMemory } from '@/hooks/use-mail-sentinel-observations'
+import { useMailObservations } from '@/hooks/use-mail-sentinel-observations'
 import { useSentinelRuns } from '@/hooks/use-sentinels'
 import { AuthTab } from './auth-tab'
 import { RecentSpamTab } from './recent-spam-tab'

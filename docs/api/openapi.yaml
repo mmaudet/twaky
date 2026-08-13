@@ -1112,6 +1112,8 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '404':
+          description: memory_not_found
         '422':
           description: Validation Error
           content:

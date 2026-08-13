@@ -507,8 +507,12 @@ def patch_memory(
 # ---------------------------------------------------------------------------
 
 
-@router.delete("/memories/{memory_id}", status_code=204)
-def delete_memory(memory_id: UUID, _owner=Depends(require_owner)):
+@router.delete(
+    "/memories/{memory_id}",
+    status_code=204,
+    responses={404: {"description": "memory_not_found"}},
+)
+def delete_memory(memory_id: UUID, _email: str = Depends(require_owner)):
     """Hard-delete a memory. Returns 404 if not found."""
     deleted = mem_store.delete(memory_id)
     if not deleted:
