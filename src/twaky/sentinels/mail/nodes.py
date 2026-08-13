@@ -703,6 +703,19 @@ _CLOSING_HEAD_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Mistral also emits "Bien à vous, Michel-Marie" (closing + name signoff)
+# on the same line. Split the name onto its own line so the mail ends
+# with the human-shape:
+#   Bien à vous,
+#
+#   Michel-Marie
+_CLOSING_NAME_RE = re.compile(
+    r"\b(Bien à vous|Cordialement|Très cordialement|Bien cordialement|"
+    r"Sincèrement|Best regards|Best|Kind regards|Sincerely|Regards|Cheers)"
+    r"\s*,[ \t]+([A-ZÀ-Ý][A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]*)\s*$",
+    re.MULTILINE,
+)
+
 
 def _ensure_paragraph_breaks(body: str) -> str:
     """Defensively insert ``\\n\\n`` after the greeting and before the closing
@@ -733,10 +746,58 @@ def _ensure_paragraph_breaks(body: str) -> str:
 
     body = _CLOSING_HEAD_RE.sub(_wrap, body)
 
-    # 3) Collapse triple+ newlines to double.
+    # 3) Split name signoff off the closing formula onto its own line.
+    def _wrap_name(match: re.Match[str]) -> str:
+        return f"{match.group(1)},\n\n{match.group(2)}"
+
+    body = _CLOSING_NAME_RE.sub(_wrap_name, body)
+
+    # 4) Collapse triple+ newlines to double.
     body = re.sub(r"\n{3,}", "\n\n", body)
 
     return body
+
+
+_STANDALONE_NAME_LINE_RE = re.compile(
+    r"^\s*[A-ZÀ-Ý][A-Za-zÀ-ÿ][A-Za-zÀ-ÿ'\-]*(?:\s+[A-ZÀ-Ý][A-Za-zÀ-ÿ'\-]*)?\s*$",
+    re.MULTILINE,
+)
+
+# A line containing ONLY a closing formula (with or without trailing
+# comma / period). Stripped alongside the standalone name so that
+# `_has_meaningful_body` correctly identifies drafts made of just a
+# greeting + closing structure with no real message body.
+_STANDALONE_CLOSING_LINE_RE = re.compile(
+    r"^\s*(Bien à vous|Cordialement|Très cordialement|Bien cordialement|"
+    r"Sincèrement|En vous remerciant|Best regards|Best|Kind regards|"
+    r"Sincerely|Regards|Cheers|Thanks|Thank you|Talk soon)\s*[,.]?\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _has_meaningful_body(body: str) -> bool:
+    """True when the LLM produced content beyond a greeting + signoff.
+
+    Guards against "hollow" drafts — Mistral occasionally returns just
+    "Bonjour X," (no body) on very short cold-outreach mails, which then
+    gets saved as a draft with only a greeting + the pipeline's canonical
+    signature. Those drafts are worse than no draft at all.
+
+    Threshold is intentionally low (10 chars) so genuine short internal
+    acknowledgements like "Merci Marion." pass through.
+    """
+    if not body:
+        return False
+    # Strip common greeting head (up to comma), common closing + name
+    # signoff variants, and standalone name lines (single-word or
+    # first-last capitalised). What's left is the "core" message body.
+    core = _GREETING_HEAD_RE.sub("", body.lstrip(), count=1)
+    core = _CLOSING_NAME_RE.sub("", core)
+    core = _CLOSING_HEAD_RE.sub("", core)
+    core = _STANDALONE_CLOSING_LINE_RE.sub("", core)
+    core = _STANDALONE_NAME_LINE_RE.sub("", core)
+    core = re.sub(r"\s+", " ", core).strip()
+    return len(core) >= 10
 
 
 def _build_reply_quote(latest: dict[str, Any], language: str) -> str:
@@ -919,6 +980,16 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
             if ctx.owner_email
             else []
         )
+
+        # --- Skip hollow drafts (greeting + signoff only, no real body) ---
+        if not _has_meaningful_body(out.body):
+            log.info(
+                "draft_reply: skipping hollow draft (no meaningful body from LLM) "
+                "email_id=%s subject=%r",
+                state.get("email_id", "?"),
+                latest.get("subject", ""),
+            )
+            return {"draft": out.body, "draft_language": out.language}
 
         # --- Compose the final body: LLM reply + signature + quoted original ---
         # Post-append the configured signature — the LLM is instructed NOT to

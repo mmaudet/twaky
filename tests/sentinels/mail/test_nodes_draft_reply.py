@@ -215,7 +215,7 @@ class TestDraftReply:
             "memory_ids": [],
         }
 
-        draft_output = DraftReplyOutput(body="Draft", language="en")
+        draft_output = DraftReplyOutput(body="Draft body for testing.", language="en")
 
         with patch(
             "twaky.sentinels.mail.nodes.structured_call",
@@ -223,7 +223,7 @@ class TestDraftReply:
         ):
             result = node(state)
 
-        assert result["draft"] == "Draft"
+        assert result["draft"] == "Draft body for testing."
 
         # Verify emit was called with 'ai' in reason
         base_ctx.mission_emitter.emit.assert_called_once()
@@ -255,7 +255,7 @@ class TestDraftReply:
             "memory_ids": [],
         }
 
-        draft_output = DraftReplyOutput(body="Draft", language="en")
+        draft_output = DraftReplyOutput(body="Draft body for testing.", language="en")
 
         with patch(
             "twaky.sentinels.mail.nodes.structured_call",
@@ -263,7 +263,7 @@ class TestDraftReply:
         ):
             result = node(state)
 
-        assert result["draft"] == "Draft"
+        assert result["draft"] == "Draft body for testing."
 
         # Verify intent_text uses placeholder
         base_ctx.mission_emitter.emit.assert_called_once()
@@ -290,7 +290,7 @@ class TestDraftReply:
             "memory_ids": [],
         }
 
-        draft_output = DraftReplyOutput(body="Draft 1", language="en")
+        draft_output = DraftReplyOutput(body="Draft 1 body for testing.", language="en")
 
         with patch(
             "twaky.sentinels.mail.nodes.structured_call",
@@ -299,7 +299,7 @@ class TestDraftReply:
             node(state)
 
         # Second draft
-        draft_output2 = DraftReplyOutput(body="Draft 2", language="en")
+        draft_output2 = DraftReplyOutput(body="Draft 2 body for testing.", language="en")
         with patch(
             "twaky.sentinels.mail.nodes.structured_call",
             return_value=draft_output2,
@@ -330,7 +330,7 @@ class TestDraftReply:
             "memory_ids": [],
         }
 
-        draft_output = DraftReplyOutput(body="Draft", language="en")
+        draft_output = DraftReplyOutput(body="Draft body for testing.", language="en")
 
         with patch(
             "twaky.sentinels.mail.nodes.structured_call",
@@ -541,3 +541,64 @@ class TestEnsureParagraphBreaks:
 
         body = "Just a plain body without greeting."
         assert _ensure_paragraph_breaks(body) == body
+
+    def test_splits_closing_name_signoff_onto_own_line(self) -> None:
+        """`Bien à vous, Michel-Marie` on one line splits to two paragraphs."""
+        from twaky.sentinels.mail.nodes import _ensure_paragraph_breaks
+
+        got = _ensure_paragraph_breaks(
+            "Bonjour Karin,\n\nQuel dommage. Bien à vous, Michel-Marie"
+        )
+        assert got.endswith("Bien à vous,\n\nMichel-Marie")
+
+    def test_english_closing_name_splits(self) -> None:
+        from twaky.sentinels.mail.nodes import _ensure_paragraph_breaks
+
+        got = _ensure_paragraph_breaks(
+            "Hi Karin,\n\nSounds great. Best regards, Michel-Marie"
+        )
+        assert got.endswith("Best regards,\n\nMichel-Marie")
+
+
+class TestHasMeaningfulBody:
+    """Guards against hollow drafts (greeting + signoff, no real content)."""
+
+    def test_greeting_only_is_hollow(self) -> None:
+        from twaky.sentinels.mail.nodes import _has_meaningful_body
+
+        assert _has_meaningful_body("Bonjour Gabriel,") is False
+
+    def test_greeting_plus_signoff_only_is_hollow(self) -> None:
+        from twaky.sentinels.mail.nodes import _has_meaningful_body
+
+        assert (
+            _has_meaningful_body(
+                "Bonjour Gabriel,\n\nBien à vous,\n\nMichel-Marie"
+            )
+            is False
+        )
+
+    def test_short_internal_acknowledgement_is_meaningful(self) -> None:
+        from twaky.sentinels.mail.nodes import _has_meaningful_body
+
+        # "Merci Marion." (13 chars core) is a valid short internal ack.
+        assert _has_meaningful_body("Merci Marion.") is True
+
+    def test_greeting_plus_real_body_is_meaningful(self) -> None:
+        from twaky.sentinels.mail.nodes import _has_meaningful_body
+
+        assert (
+            _has_meaningful_body(
+                "Bonjour Karin,\n\n"
+                "Nous serions effectivement intéressés par ce type de "
+                "collaboration. Pouvez-vous préciser les modalités ?\n\n"
+                "Bien à vous,\n\nMichel-Marie"
+            )
+            is True
+        )
+
+    def test_empty_body_is_hollow(self) -> None:
+        from twaky.sentinels.mail.nodes import _has_meaningful_body
+
+        assert _has_meaningful_body("") is False
+        assert _has_meaningful_body("   \n\n  ") is False
