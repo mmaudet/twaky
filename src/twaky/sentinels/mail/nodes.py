@@ -682,6 +682,63 @@ def make_select_memories(
     return _node
 
 
+# Common greeting patterns across FR / EN / ES / DE. When Mistral emits
+# the greeting and body on the same line ("Bonjour Charlotte, Je suis
+# preneur…"), we split them so the greeting stands alone with a blank
+# line separator — matches the human writing style profile. The regex
+# stops at the comma (or newline) that terminates a greeting.
+_GREETING_HEAD_RE = re.compile(
+    r"^(Bonjour|Bonsoir|Cher|Chère|Chers|Chères|Hello|Hi|Hey|Salut|Holá|Hola|Guten Tag|Buenos días|Buenas tardes)\b[^,\n]*,",
+    re.IGNORECASE,
+)
+
+# Common closing formulas. Mistral sometimes emits "…utile. Bien à vous,
+# Michel-Marie" on one line — we split off the closing so it stands on
+# its own paragraph.
+_CLOSING_HEAD_RE = re.compile(
+    r"(?<=[.!?])\s+"
+    r"(Bien à vous|Cordialement|Très cordialement|Bien cordialement|"
+    r"Sincèrement|En vous remerciant|Best regards|Best|Kind regards|"
+    r"Sincerely|Regards|Cheers|Thanks|Thank you|Talk soon)\s*,",
+    re.IGNORECASE,
+)
+
+
+def _ensure_paragraph_breaks(body: str) -> str:
+    """Defensively insert ``\\n\\n`` after the greeting and before the closing
+    formula when the LLM emitted them inline with the body.
+
+    Mistral (and similar mid-tier LLMs) intermittently ignore the prompt's
+    format instruction and emit ``Bonjour X, Je suis preneur…`` on one
+    line, which makes the draft look AI-generated. This post-processor
+    matches the greeting head + comma at the start and inserts a blank
+    line before the next non-whitespace. Same treatment for the closing.
+    Idempotent: bodies already correctly formatted are unchanged.
+    """
+    if not body:
+        return body
+
+    # 1) Split greeting → blank line → body.
+    m = _GREETING_HEAD_RE.match(body.lstrip())
+    if m:
+        stripped = body.lstrip()
+        head = stripped[: m.end()].rstrip()
+        rest = stripped[m.end() :].lstrip()
+        if rest and not head.endswith("\n\n"):
+            body = f"{head}\n\n{rest}"
+
+    # 2) Split closing formula onto its own paragraph.
+    def _wrap(match: re.Match[str]) -> str:
+        return f"\n\n{match.group(1)},"
+
+    body = _CLOSING_HEAD_RE.sub(_wrap, body)
+
+    # 3) Collapse triple+ newlines to double.
+    body = re.sub(r"\n{3,}", "\n\n", body)
+
+    return body
+
+
 def _build_reply_quote(latest: dict[str, Any], language: str) -> str:
     """Format the original message as a quoted block for the reply body.
 
@@ -867,7 +924,7 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
         # Post-append the configured signature — the LLM is instructed NOT to
         # invent one but often does anyway; overriding here ensures the real
         # signature (title, phone, legal notice) is always present.
-        final_body = out.body.rstrip()
+        final_body = _ensure_paragraph_breaks(out.body).rstrip()
         signature = (settings.mail_sentinel_signature or "").strip()
         if signature:
             final_body = f"{final_body}\n\n{signature}"
