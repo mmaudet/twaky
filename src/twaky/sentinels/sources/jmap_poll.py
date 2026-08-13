@@ -452,6 +452,34 @@ class JmapPollingEventSource(EventSource):
                         self._persist_state(new_state)
                         state = new_state
 
+                        # SP5b: run observer at end of each tick when enabled
+                        from twaky.config import settings as _settings
+
+                        if _settings.mail_sentinel_observer_enabled:
+                            try:
+                                from twaky.sentinels.mail.jmap_observer_client import (
+                                    JmapObserverClient,
+                                )
+                                from twaky.sentinels.mail.observer import MailObserver
+
+                                _access_token = await self._manager.get_access_token()
+                                _obs_client = JmapObserverClient(
+                                    api_url=api_url,
+                                    access_token=_access_token,
+                                    account_id=account_id,
+                                )
+                                _observer = MailObserver()
+                                await _observer.run_tick(
+                                    _obs_client,
+                                    owner_email=_settings.jmap_account_email,
+                                )
+                            except Exception as _obs_err:  # noqa: BLE001
+                                log.warning(
+                                    "jmap_poll[%s]: observer tick failed: %r",
+                                    self._sentinel_name,
+                                    _obs_err,
+                                )
+
                         # Interruptible sleep
                         try:
                             await asyncio.wait_for(
