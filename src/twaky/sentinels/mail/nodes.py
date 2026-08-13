@@ -895,7 +895,7 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
         # backward compatibility with older pipeline configurations.
         raw_memories: list[dict[str, Any]] | None = state.get("memories")
         if raw_memories is not None:
-            memories_dicts = [{"content": m.get("content", "")} for m in raw_memories]
+            memories_dicts = [{"id": m.get("id", ""), "content": m.get("content", "")} for m in raw_memories]
         else:
             memory_ids = state.get("memory_ids") or []
             fetched = mem_store.get_many(memory_ids) if memory_ids else []

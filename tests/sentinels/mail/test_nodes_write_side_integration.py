@@ -67,6 +67,22 @@ def test_match_rules_short_circuits_on_trust_sender():
     assert result.get("skip_spam_triage") is True
 
 
+def test_match_rules_short_circuits_on_block_sender():
+    for _ in range(3):
+        lp.record_decision(
+            sender_email="spammer@x.com", rule_name="block_sender", confidence_hint=0.95
+        )
+    ctx = _build_ctx()
+    state = {
+        "email_id": "e1",
+        "thread": [{"from": [{"email": "spammer@x.com"}], "subject": "s", "textBody": "b"}],
+    }
+    result = make_match_rules(ctx)(state)  # type: ignore[arg-type]
+    assert result.get("matched_by") == "learned_pattern"
+    assert result.get("rule_name") == "block_sender"
+    assert result.get("bucket") == "spam"
+
+
 def test_select_memories_touches_returned_ids():
     from datetime import datetime
 
