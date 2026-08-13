@@ -80,20 +80,31 @@ def build_graph(ctx: NodeContext):
 
     graph: StateGraph = StateGraph(MailAgentState)
 
-    # Each node wrapped by ``resilient_node`` for a 30s wall-time budget
-    # and a fatal-error trap — a single crashing email cannot bring down
-    # the pipeline for subsequent emails. See ``robustness.py``.
-    def _add(name: str, factory: Any) -> None:
-        graph.add_node(name, resilient_node(name, factory(ctx)))  # type: ignore[call-overload]
+    # Each node wrapped by ``resilient_node`` for a wall-time budget +
+    # fatal-error trap — a single crashing email cannot bring down the
+    # pipeline for subsequent emails. See ``robustness.py``.
+    #
+    # Timeouts (2026-08-13 tuning after UAT):
+    #  - LLM-heavy nodes: 90s (structured_output can retry on JSON parse
+    #    failures; Mistral is fast at ~1s/call but 3-5 retries + prompt
+    #    tokenisation on a long thread can approach the old 30s cap).
+    #  - Non-LLM nodes: 30s (default) — anything longer is a bug.
+    _LLM_TIMEOUT = 90.0
+
+    def _add(name: str, factory: Any, timeout_s: float = 30.0) -> None:
+        graph.add_node(
+            name,
+            resilient_node(name, factory(ctx), timeout_s=timeout_s),  # type: ignore[call-overload]
+        )
 
     _add("load_thread", make_load_thread)
-    _add("spam_triage", make_spam_triage)
-    _add("match_rules", make_match_rules)
-    _add("learn_pattern", make_learn_pattern)
+    _add("spam_triage", make_spam_triage, timeout_s=_LLM_TIMEOUT)
+    _add("match_rules", make_match_rules, timeout_s=_LLM_TIMEOUT)
+    _add("learn_pattern", make_learn_pattern, timeout_s=_LLM_TIMEOUT)
     _add("apply_actions", make_apply_actions)
-    _add("thread_status", make_thread_status)
-    _add("select_memories", make_select_memories)
-    _add("draft_reply", make_draft_reply)
+    _add("thread_status", make_thread_status, timeout_s=_LLM_TIMEOUT)
+    _add("select_memories", make_select_memories, timeout_s=_LLM_TIMEOUT)
+    _add("draft_reply", make_draft_reply, timeout_s=_LLM_TIMEOUT)
 
     graph.add_edge(START, "load_thread")
     graph.add_edge("load_thread", "spam_triage")
