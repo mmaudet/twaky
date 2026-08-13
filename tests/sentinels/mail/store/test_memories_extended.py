@@ -112,6 +112,17 @@ def test_list_for_prompt_filters_expired():
     assert all(r.id != m.id for r in rows)
 
 
+def test_delete_removes_row():
+    m = mem.insert(kind="fact", scope="global", scope_value="*", content="x")
+    assert mem.delete(m.id) is True
+    assert mem.list_recent(limit=10) == [] or all(r.id != m.id for r in mem.list_recent(limit=10))
+
+
+def test_delete_missing_returns_false():
+    from uuid import uuid4
+    assert mem.delete(uuid4()) is False
+
+
 def test_set_persist_true_nulls_expires_at():
     m = mem.insert(kind="fact", scope="global", scope_value="*", content="p")
     updated = mem.set_persist(m.id, True)

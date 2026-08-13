@@ -1095,6 +1095,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - mail-sentinel
+      summary: Delete Memory
+      description: Hard-delete a memory. Returns 404 if not found.
+      operationId: delete_memory_mail_sentinel_memories__memory_id__delete
+      parameters:
+      - name: memory_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Memory Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /mail-sentinel/observations:
     get:
       tags:

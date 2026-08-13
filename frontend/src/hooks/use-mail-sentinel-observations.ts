@@ -52,23 +52,17 @@ export function usePatchMailMemory() {
     })
 }
 
-/** Forget = reset to 7-day TTL (PATCH persist=false). */
 export function useForgetMailMemory() {
-    const qc = useQueryClient()
+    const queryClient = useQueryClient()
     return useMutation({
-        mutationFn: async (memory_id: string) => {
-            const { data, error } = await api.PATCH(
-                '/mail-sentinel/memories/{memory_id}',
-                {
-                    params: { path: { memory_id } },
-                    body: { persist: false },
-                },
-            )
+        mutationFn: async (memoryId: string) => {
+            const { error } = await api.DELETE('/mail-sentinel/memories/{memory_id}', {
+                params: { path: { memory_id: memoryId } },
+            })
             if (error) throw toApiError(error)
-            return data
         },
         onSuccess: () => {
-            qc.invalidateQueries({ queryKey: ['mail-memories'] })
+            queryClient.invalidateQueries({ queryKey: ['mail-memories'] })
         },
     })
 }

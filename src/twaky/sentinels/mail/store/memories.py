@@ -329,6 +329,17 @@ def list_for_prompt(
         return [_row_to_memory(r) for r in cur.fetchall()]
 
 
+def delete(memory_id: UUID) -> bool:
+    """Delete a memory row by id.
+
+    Returns True if a row was deleted, False if the id was not found.
+    """
+    sql = "DELETE FROM mail_sentinel_memory WHERE id = %s"
+    with get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (memory_id,))
+        return cur.rowcount > 0
+
+
 def set_persist(memory_id: UUID, persist: bool) -> MailMemory | None:
     """Toggle a memory between permanent (expires_at=NULL) and 7-day TTL."""
     if persist:
@@ -354,6 +365,7 @@ __all__ = [
     "PUBLIC_EMAIL_DOMAINS",
     "MailMemory",
     "candidate_pool",
+    "delete",
     "get_many",
     "insert",
     "list_for_prompt",

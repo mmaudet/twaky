@@ -503,7 +503,21 @@ def patch_memory(
 
 
 # ---------------------------------------------------------------------------
-# 11. GET /mail-sentinel/observations  (SP5b)
+# 11. DELETE /mail-sentinel/memories/{id}  (SP5b gap-fill)
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/memories/{memory_id}", status_code=204)
+def delete_memory(memory_id: UUID, _owner=Depends(require_owner)):
+    """Hard-delete a memory. Returns 404 if not found."""
+    deleted = mem_store.delete(memory_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="memory_not_found")
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# 12. GET /mail-sentinel/observations  (SP5b)
 # ---------------------------------------------------------------------------
 
 

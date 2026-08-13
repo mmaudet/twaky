@@ -108,6 +108,21 @@ def test_get_observations_returns_recent(client):
     assert data[0]["observation_type"] == "draft_sent"
 
 
+def test_delete_memory_returns_204(client):
+    m = mem.insert(kind="fact", scope="global", scope_value="*", content="to-delete")
+    resp = client.delete(f"/mail-sentinel/memories/{m.id}")
+    assert resp.status_code == 204
+    # verify actually gone
+    remaining = mem.list_recent(limit=10)
+    assert all(x.id != m.id for x in remaining)
+
+
+def test_delete_memory_404_when_missing(client):
+    from uuid import uuid4
+    resp = client.delete(f"/mail-sentinel/memories/{uuid4()}")
+    assert resp.status_code == 404
+
+
 def test_list_memories_exposes_source_and_confidence(client):
     mem.insert(
         kind="fact",
