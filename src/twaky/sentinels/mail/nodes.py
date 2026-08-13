@@ -967,6 +967,154 @@ def _parse_rspamd_score(headers: list[dict[str, Any]]) -> float | None:
 _RSPAMD_SCORE_GREY_MIN = 3.0
 
 
+# ---------------------------------------------------------------------------
+# Brand-impersonation detection
+# ---------------------------------------------------------------------------
+# Brands frequently impersonated in phishing. Each key maps to a tuple of
+# domain SUFFIXES that legitimately send on behalf of that brand. Any
+# email that mentions the brand (in subject/from-name/preview) but is NOT
+# sent from one of those suffixes is a strong impersonation signal.
+#
+# Suffixes are matched with `.endswith("." + suffix) or == suffix` so that
+# sub-domains ``updates.paypal.com`` correctly count as ``paypal.com``.
+_BRAND_LEGIT_DOMAINS: dict[str, tuple[str, ...]] = {
+    # Payments
+    "paypal": ("paypal.com", "paypal.fr", "paypalcorp.com"),
+    "stripe": ("stripe.com",),
+    "revolut": ("revolut.com",),
+    # French banks
+    "bnp": ("bnpparibas.com", "bnpparibas.fr", "bnpparibas.net"),
+    "societe generale": ("societegenerale.fr", "societegenerale.com"),
+    "credit agricole": ("credit-agricole.fr", "ca-technologies.fr"),
+    "boursorama": ("boursorama.com", "boursobank.com"),
+    "banque postale": ("labanquepostale.fr",),
+    "hsbc": ("hsbc.com", "hsbc.fr"),
+    "lcl": ("lcl.fr", "lcl.com"),
+    # Retail / big tech
+    "amazon": (
+        "amazon.com",
+        "amazon.fr",
+        "amazon.co.uk",
+        "amazon.de",
+        "amazon.it",
+        "amazon.es",
+        "amazon.ca",
+        "amazon.co.jp",
+        "email.amazon.com",
+    ),
+    "apple": ("apple.com", "email.apple.com", "insideapple.apple.com"),
+    "microsoft": (
+        "microsoft.com",
+        "email.microsoftemail.com",
+        "accountprotection.microsoft.com",
+        "microsoftonline.com",
+        "office.com",
+        "office365.com",
+    ),
+    "google": ("google.com", "gmail.com", "accounts.google.com", "youtube.com"),
+    "netflix": ("netflix.com",),
+    "dropbox": ("dropbox.com", "dropboxmail.com"),
+    "meta": ("meta.com", "facebook.com", "facebookmail.com", "instagram.com"),
+    "facebook": ("facebook.com", "facebookmail.com"),
+    "linkedin": ("linkedin.com",),
+    # French telecom
+    "orange": ("orange.fr", "orange.com"),
+    "sfr": ("sfr.fr", "sfr.com"),
+    "free": ("free.fr", "free-mobile.fr"),
+    "bouygues": ("bouyguestelecom.fr",),
+    # Delivery / parcel
+    "colissimo": ("colissimo.fr", "laposte.fr"),
+    "chronopost": ("chronopost.fr",),
+    "dhl": ("dhl.com", "dhl.fr"),
+    "fedex": ("fedex.com",),
+    "ups": ("ups.com",),
+    "la poste": ("laposte.fr", "laposte.net"),
+}
+
+# Urgency + credential-harvest phrases in FR + EN, ordered by frequency
+# observed in phishing samples.
+_URGENCY_PATTERNS = (
+    # French
+    "sera fermé",
+    "sera fermée",
+    "sera suspendu",
+    "sera bloqué",
+    "sera bloquée",
+    "vérifier votre compte",
+    "vérifier vos informations",
+    "confirmer votre compte",
+    "confirmer vos informations",
+    "mise à jour de sécurité",
+    "action requise",
+    "dernière chance",
+    "expire aujourd",
+    "attention requise",
+    "compte inactif",
+    "identifiants expirés",
+    # English
+    "will be closed",
+    "will be suspended",
+    "will be blocked",
+    "verify your account",
+    "verify your information",
+    "confirm your account",
+    "confirm your information",
+    "security update",
+    "action required",
+    "final notice",
+    "expires today",
+    "unusual activity",
+    "unauthorized access",
+    # Delivery scams
+    "delivery failed",
+    "livraison échouée",
+    "notification de livraison",
+    "parcel status",
+    "colis en attente",
+    "colis bloqué",
+)
+
+
+def _brand_impersonation_signal(email: dict[str, Any]) -> tuple[bool, str]:
+    """Detect brand-impersonation signals in an email.
+
+    Returns (fires, reason). ``fires`` is True when ONE of:
+    - A known brand is mentioned (subject / from-name / preview) but the
+      sender domain is NOT in the brand's legitimate suffix list.
+    - A known brand is mentioned AND the subject contains one of the
+      urgency / credential-harvest phrases (regardless of whether the
+      sender domain matches — real companies rarely combine both).
+
+    ``reason`` is a short string suitable for the ``mail_sentinel_spam_decision``
+    reason column, e.g. ``"brand=paypal + urgency 'sera fermé'"``.
+    """
+    from_list = email.get("from") or []
+    from_email = from_list[0].get("email", "").lower() if from_list else ""
+    from_name = from_list[0].get("name", "").lower() if from_list else ""
+    from_domain = from_email.split("@")[-1] if "@" in from_email else ""
+    subject = (email.get("subject") or "").lower()
+    preview = (email.get("preview") or "").lower()
+
+    haystack = f"{from_name}\n{subject}\n{preview}"
+
+    for brand, legit_suffixes in _BRAND_LEGIT_DOMAINS.items():
+        if brand not in haystack:
+            continue
+        domain_ok = any(
+            from_domain == suf or from_domain.endswith("." + suf)
+            for suf in legit_suffixes
+        )
+        urgency_hit = next(
+            (p for p in _URGENCY_PATTERNS if p in subject or p in preview),
+            None,
+        )
+        if not domain_ok:
+            return True, f"brand={brand} + domain mismatch ({from_domain!r})"
+        if urgency_hit:
+            return True, f"brand={brand} + urgency {urgency_hit!r}"
+    return False, ""
+
+
 @dataclass
 class _HeuristicResult:
     """Result of the header-based heuristic scoring."""
@@ -1401,12 +1549,24 @@ def make_spam_triage(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
         grey_zone = rspamd_action in {"add header", "greylist"}
 
         # ----------------------------------------------------------------
+        # Brand impersonation — computed FIRST so it can defeat the
+        # nonjunk-based early return below. Real PayPal / banks /
+        # carriers rarely combine brand mention with urgency phrasing;
+        # if the signal fires, the LLM decides the final bucket even
+        # when rspamd trusts the mail.
+        # ----------------------------------------------------------------
+        brand_fires, brand_reason = _brand_impersonation_signal(latest)
+
+        # ----------------------------------------------------------------
         # Score-aware grey-zone override: even if James set nonjunk (=1),
         # a non-trivial rspamd score means the classifier saw signals
         # worth double-checking. Route to LLM. Below the threshold and
         # with nonjunk set → keep the pass-through (avoids blasting the
-        # LLM budget on obvious ham like calendar invites).
-        if rspamd_score is not None and rspamd_score >= _RSPAMD_SCORE_GREY_MIN:
+        # LLM budget on obvious ham like calendar invites) UNLESS brand
+        # impersonation fires.
+        if (
+            rspamd_score is not None and rspamd_score >= _RSPAMD_SCORE_GREY_MIN
+        ) or brand_fires:
             grey_zone = True
         elif kw.get("nonjunk") and (
             rspamd_score is None or rspamd_score < _RSPAMD_SCORE_GREY_MIN
@@ -1439,6 +1599,8 @@ def make_spam_triage(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
 
         # Build a compact headers summary string for the prompt
         headers_summary_lines = [f"{k}: {v}" for k, v in h.summary.items()]
+        if brand_fires:
+            headers_summary_lines.append(f"brand_impersonation: {brand_reason}")
         headers_summary = "\n".join(headers_summary_lines)
 
         prompt = spam_check_prompt(
