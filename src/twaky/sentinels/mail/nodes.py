@@ -1203,6 +1203,142 @@ _URGENCY_PATTERNS = (
 )
 
 
+# Cold-outreach patterns: phrases that quasi-uniquely identify unsolicited
+# sales / recruitment / SEO / link-building / event-list pitches. When one
+# of these appears in the subject or preview, force the LLM grey-zone
+# even if rspamd trusted the mail. Motivated by 2026-08-13 UAT: 4
+# spammy mails (Nezri recruitment, Sara Green SEO, Emma Pearson
+# Dreamforce, Burkhard Berger link building) all had rspamd nonjunk=True
+# + score < 3 + no list-unsub → passed through with no signal at all.
+_COLD_OUTREACH_PATTERNS_SUBJECT = (
+    # Follow-up urgency
+    "just following up",
+    "following up on",
+    "quick follow up",
+    "quick follow-up",
+    "bumping this",
+    "did you see my",
+    # Personalization tricks — subject starts with recipient first name
+    # then comma or dash + short body (e.g., "Michel-Marie, 5 days",
+    # "Michel-Marie - a question", "Michel, quick question"). Matched
+    # separately via regex on the FIRST word matching the owner's first
+    # name in the subject (see check below).
+    # Recruitment placement outreach
+    "profil disponible",
+    "présentation d'un profil",
+    "profil intéressant",
+    "profile available",
+    "cv attached",
+    "candidat disponible",
+    # Event / conference lead lists
+    "attendees at",
+    "attendee list",
+    "delegate list",
+    "exhibitors list",
+    "buyers list",
+    "verified attendees",
+    "verified emails",
+    # SEO / link-building / traffic
+    "increase your web",
+    "improve your website",
+    "improve your seo",
+    "seo audit",
+    "link building",
+    "mind if i mention",
+    "mention (and link to)",
+    "add your link",
+    "guest post",
+    # Sales generic
+    "quick question about",
+    "would you be interested",
+    "quick chat about",
+    "a question on your",
+    "have a question about your",
+)
+_COLD_OUTREACH_PATTERNS_PREVIEW = (
+    "just following up",
+    "following up on my last email",
+    "wanted to circle back",
+    "i hope you are doing well",
+    "i hope this email finds you well",
+    "mind if i mention",
+    "would you be interested",
+    "would you have some time",
+    "would love to schedule",
+    "quick 10 minutes",
+    "10-minute call",
+    "10 minute call",
+    "just checking in",
+    "want to make sure this reached",
+    "did not want to intrude",
+    "hope this isn't a bad time",
+    "i noticed a few opportunities",
+    "just following up on my last",
+    "the reason i am reaching out",
+    "the reason we are reaching out",
+    "a few website improvements",
+    "leads database",
+    "verified b2b",
+    "b2b database",
+    "b2b contacts",
+    "our platform provides",
+    "outreach services",
+)
+
+
+def _cold_outreach_signal(
+    email: dict[str, Any], owner_email: str = ""
+) -> tuple[bool, str]:
+    """Detect cold-outreach / lead-generation / SEO-spam patterns.
+
+    Returns (fires, reason). Scans the subject and preview for phrases
+    that appear almost exclusively in unsolicited outreach:
+    - Follow-up urgency ("just following up", "5 days")
+    - Recruitment placement ("profil disponible")
+    - Event lead lists ("Attendees at Dreamforce 2026")
+    - SEO / link building ("increase your web traffic", "mind if I mention")
+    - Sales openers ("quick question about your", "would you be interested")
+    - Personalization trick — subject starts with the owner's first name
+      followed by a comma/dash ("Michel-Marie, 5 days" from the UAT log).
+
+    Combines with the score-aware grey-zone override so these mails always
+    reach the LLM even when rspamd/heuristics find nothing wrong.
+    """
+    subject = (email.get("subject") or "").lower()
+    preview = (email.get("preview") or "").lower()
+
+    for pat in _COLD_OUTREACH_PATTERNS_SUBJECT:
+        if pat in subject:
+            return True, f"cold-outreach: subject contains {pat!r}"
+    for pat in _COLD_OUTREACH_PATTERNS_PREVIEW:
+        if pat in preview:
+            return True, f"cold-outreach: preview contains {pat!r}"
+
+    # Personalization trick: subject starts with owner's first name +
+    # comma/dash. Matches "Michel-Marie, 5 days" but not "Re: Michel-Marie
+    # signed the doc" (which is a natural continuation).
+    if owner_email:
+        # Derive first name from twaky_owner_name setting or local-part
+        first_name = (settings.twaky_owner_name or "").split(" ")[0].strip().lower()
+        if not first_name and "@" in owner_email:
+            first_name = owner_email.split("@")[0].lower()
+        if first_name and len(first_name) >= 3:
+            # Check bare subject (no "Re:" prefix — those are legit threads)
+            plain = subject.strip()
+            for prefix in ("re:", "re :", "fwd:", "fw:", "tr:"):
+                if plain.startswith(prefix):
+                    return False, ""
+            if plain.startswith(first_name):
+                after = plain[len(first_name) :].lstrip()
+                if after.startswith((",", "-", ":", "—")):
+                    return True, (
+                        f"cold-outreach: subject starts with owner first name "
+                        f"({first_name!r}) followed by punctuation"
+                    )
+
+    return False, ""
+
+
 def _brand_impersonation_signal(email: dict[str, Any]) -> tuple[bool, str]:
     """Detect brand-impersonation signals in an email.
 
@@ -1677,13 +1813,14 @@ def make_spam_triage(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
         grey_zone = rspamd_action in {"add header", "greylist"}
 
         # ----------------------------------------------------------------
-        # Brand impersonation — computed FIRST so it can defeat the
-        # nonjunk-based early return below. Real PayPal / banks /
-        # carriers rarely combine brand mention with urgency phrasing;
-        # if the signal fires, the LLM decides the final bucket even
-        # when rspamd trusts the mail.
+        # Content-based override signals — computed FIRST so they can
+        # defeat the nonjunk-based early return below. Both brand
+        # impersonation and cold-outreach patterns fire on mails that
+        # rspamd trusts (score < 3, nonjunk=True, no bad DKIM, no bad
+        # domain) but that are unambiguous unsolicited sales/pitches.
         # ----------------------------------------------------------------
         brand_fires, brand_reason = _brand_impersonation_signal(latest)
+        cold_fires, _cold_reason = _cold_outreach_signal(latest, ctx.owner_email)
 
         # ----------------------------------------------------------------
         # Score-aware grey-zone override: even if James set nonjunk (=1),
@@ -1691,10 +1828,12 @@ def make_spam_triage(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
         # worth double-checking. Route to LLM. Below the threshold and
         # with nonjunk set → keep the pass-through (avoids blasting the
         # LLM budget on obvious ham like calendar invites) UNLESS brand
-        # impersonation fires.
+        # impersonation or cold-outreach fires.
         if (
-            rspamd_score is not None and rspamd_score >= _RSPAMD_SCORE_GREY_MIN
-        ) or brand_fires:
+            (rspamd_score is not None and rspamd_score >= _RSPAMD_SCORE_GREY_MIN)
+            or brand_fires
+            or cold_fires
+        ):
             grey_zone = True
         elif kw.get("nonjunk") and (
             rspamd_score is None or rspamd_score < _RSPAMD_SCORE_GREY_MIN

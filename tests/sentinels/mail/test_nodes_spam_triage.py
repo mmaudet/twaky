@@ -705,6 +705,138 @@ class TestBrandImpersonation:
         assert result["spam_bucket"] == "phishing-alert"
 
 
+class TestColdOutreachSignal:
+    """Cold-outreach / lead-generation / SEO-spam pattern detection.
+
+    Motivated by 2026-08-13 UAT: 4 spammy mails (Nezri recruitment,
+    Sara Green SEO, Emma Pearson Dreamforce, Burkhard Berger link
+    building) all had rspamd nonjunk=True + score < 3 + no list-unsub
+    → passed through with no signal at all. The content-based detector
+    forces the LLM grey-zone on these patterns.
+    """
+
+    def test_recruitment_profil_disponible_fires(self) -> None:
+        from twaky.sentinels.mail.nodes import _cold_outreach_signal
+
+        email = {
+            "subject": "Présentation d'un profil disponible – Technicien Support IT",
+            "preview": "Bonjour, je vous propose le profil d'Émilien...",
+        }
+        fires, reason = _cold_outreach_signal(email)
+        assert fires
+        assert "profil disponible" in reason
+
+    def test_attendees_list_fires(self) -> None:
+        from twaky.sentinels.mail.nodes import _cold_outreach_signal
+
+        email = {
+            "subject": "Attendees at Dreamforce Conference 2026",
+            "preview": "Hi there, I hope you are doing well.",
+        }
+        fires, _reason = _cold_outreach_signal(email)
+        assert fires
+
+    def test_seo_traffic_fires(self) -> None:
+        from twaky.sentinels.mail.nodes import _cold_outreach_signal
+
+        email = {
+            "subject": "Re: Increase Your Web Traffic..",
+            "preview": (
+                "Hi there, Just following up on my last email regarding "
+                "a few website improvements..."
+            ),
+        }
+        fires, _reason = _cold_outreach_signal(email)
+        assert fires
+
+    def test_link_building_mind_if_i_mention_fires(self) -> None:
+        from twaky.sentinels.mail.nodes import _cold_outreach_signal
+
+        email = {
+            "subject": "Michel-Marie, 5 days",
+            "preview": (
+                "Hey Michel-Marie, Mind if I mention (and link to) Linagora "
+                "in my upcoming blog post?"
+            ),
+        }
+        fires, _reason = _cold_outreach_signal(email, owner_email="mmaudet@linagora.com")
+        assert fires
+
+    def test_personalization_first_name_comma_subject_fires(self) -> None:
+        """Subject starting with owner first name + comma is a personalization trick."""
+        from twaky.config import settings
+        from twaky.sentinels.mail.nodes import _cold_outreach_signal
+
+        # Simulate the config having twaky_owner_name = Michel-Marie
+        original = settings.twaky_owner_name
+        try:
+            settings.twaky_owner_name = "Michel-Marie Maudet"
+            email = {"subject": "Michel-Marie, quick question", "preview": ""}
+            fires, reason = _cold_outreach_signal(
+                email, owner_email="michel.maudet@linagora.com"
+            )
+            assert fires
+            assert "first name" in reason
+        finally:
+            settings.twaky_owner_name = original
+
+    def test_re_prefix_does_not_fire_personalization(self) -> None:
+        """Legit thread continuations start with Re: — should not fire."""
+        from twaky.config import settings
+        from twaky.sentinels.mail.nodes import _cold_outreach_signal
+
+        original = settings.twaky_owner_name
+        try:
+            settings.twaky_owner_name = "Michel-Marie Maudet"
+            email = {
+                "subject": "Re: Michel-Marie's proposal is approved",
+                "preview": "great news",
+            }
+            fires, _ = _cold_outreach_signal(
+                email, owner_email="michel.maudet@linagora.com"
+            )
+            assert fires is False
+        finally:
+            settings.twaky_owner_name = original
+
+    def test_legit_business_email_does_not_fire(self) -> None:
+        from twaky.sentinels.mail.nodes import _cold_outreach_signal
+
+        email = {
+            "subject": "Contrat signé — merci",
+            "preview": "Bonjour Michel, contrat renvoyé signé en pièce jointe.",
+        }
+        fires, _ = _cold_outreach_signal(email)
+        assert fires is False
+
+    def test_full_pipeline_forces_llm_on_cold_outreach(self) -> None:
+        """End-to-end: nonjunk + score 0 + cold-outreach pattern → LLM called."""
+        ctx = _ctx()
+        email = _email(
+            keywords={"nonjunk": True},
+            headers=[
+                {"name": "dkim-signature", "value": "v=1; a=rsa-sha256"},
+                {
+                    "name": "org.apache.james.rspamd.status",
+                    "value": "No, actions=no action score=0.5 requiredScore=12.0",
+                },
+            ],
+            sender="cold@outreach.com",
+            subject="Attendees at Dreamforce Conference 2026",
+            preview="Hi there, I hope you are doing well.",
+        )
+        node = make_spam_triage(ctx)
+
+        llm_out = SpamCheckOutput(bucket="spam", confidence=0.85, reason="cold pitch")
+        with patch(
+            "twaky.sentinels.mail.nodes.structured_call", return_value=llm_out
+        ) as mock_llm:
+            result = node(_state(email))  # type: ignore[arg-type]
+
+        mock_llm.assert_called_once()
+        assert result["spam_bucket"] == "spam"
+
+
 class TestSpamTriageStage3:
     def test_stage3_newsletter_heuristic_labels(self) -> None:
         """Stage 3: list-unsubscribe present + score < 5 → bucket=newsletter, no LLM.
