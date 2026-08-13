@@ -104,4 +104,4 @@ def test_second_tick_dispatches_draft_sent(monkeypatch):
             MailObserver().run_tick(adapter, owner_email="mmaudet@linagora.com")
         )
     diff_mock.assert_called_once()
-    assert result.observations_created >= 0  # dispatch happened
+    assert result.observations_created == 1  # one email dispatched → one observation
