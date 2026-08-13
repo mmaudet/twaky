@@ -1,0 +1,20 @@
+name: folder_move_no_repetition
+
+description: >
+  A single move to an "Archive" folder with no history should NOT
+  create a memory (LLM should return should_extract=false) but SHOULD
+  record a candidate pattern (evidence_count=1, not yet active).
+
+input:
+  sender_email: firsttime@unknown.com
+  folder_name: Archive
+  subject: Info
+  history_count: 0
+
+expected:
+  memories: []
+  patterns:
+    - sender_email: firsttime@unknown.com
+      rule_name: label:Archive
+      is_active: false
+      evidence_count: 1

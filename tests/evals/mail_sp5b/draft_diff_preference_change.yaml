@@ -1,0 +1,33 @@
+name: draft_diff_preference_change
+
+description: >
+  User replaces 'Cher X' with 'Bonjour X' — extractor should produce
+  a scope=sender preference memory.
+
+input:
+  ai_draft: |
+    Cher Alexandre,
+
+    Merci pour ton message.
+
+    Bien à vous,
+
+    Michel-Marie
+  shipped_body: |
+    Bonjour Alexandre,
+
+    Merci pour ton message.
+
+    Bien à vous,
+
+    Michel-Marie
+  sender_email: alexandre@linagora.com
+  recipient_email: alexandre@linagora.com
+
+expected:
+  memories:
+    - scope: sender
+      scope_value: alexandre@linagora.com
+      kind: preference
+      content_contains: bonjour
+      min_confidence: 0.7
