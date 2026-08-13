@@ -100,7 +100,12 @@ class TestDraftReply:
         assert len(adapter._drafts) == 1
         saved_draft = adapter._drafts[0]
         assert saved_draft["in_reply_to"] == "e1"
-        assert saved_draft["body"].startswith("Bonjour Alice, merci pour ton message.")
+        # `_ensure_paragraph_breaks` inserts a blank line after the greeting
+        # comma so the greeting stands as its own paragraph — matches the
+        # human style profile.
+        assert saved_draft["body"].startswith(
+            "Bonjour Alice,\n\nmerci pour ton message."
+        )
         assert "a écrit :" in saved_draft["body"]  # attribution line (fr)
         assert saved_draft["language"] == "fr"
 
@@ -479,3 +484,60 @@ class TestDraftSignature:
         assert saved.startswith("Body only.")
         # Attribution line immediately follows (with the double newline).
         assert saved.index("a écrit :") - saved.index("Body only.") < 100
+
+
+class TestEnsureParagraphBreaks:
+    """Defensive post-processor that repairs greeting/closing runs when the
+    LLM emits them inline. Motivated by 2026-08-13 UAT: Mistral produced
+    "Bonjour Charlotte, Je suis preneur…" on one line, making drafts look
+    AI-generated.
+    """
+
+    def test_splits_greeting_from_body(self) -> None:
+        from twaky.sentinels.mail.nodes import _ensure_paragraph_breaks
+
+        got = _ensure_paragraph_breaks(
+            "Bonjour Charlotte, Je suis preneur d'un échange cette semaine."
+        )
+        assert got.startswith("Bonjour Charlotte,\n\nJe suis preneur")
+
+    def test_leaves_correctly_formatted_body_alone(self) -> None:
+        from twaky.sentinels.mail.nodes import _ensure_paragraph_breaks
+
+        good = (
+            "Bonjour Charlotte,\n\n"
+            "Le sujet des surcotisations nous concerne.\n\n"
+            "Bien à vous,\n\nMichel-Marie"
+        )
+        assert _ensure_paragraph_breaks(good) == good
+
+    def test_splits_closing_from_body(self) -> None:
+        from twaky.sentinels.mail.nodes import _ensure_paragraph_breaks
+
+        got = _ensure_paragraph_breaks(
+            "Bonjour,\n\nMerci pour votre message. Bien à vous, Michel-Marie"
+        )
+        # closing pops onto its own paragraph
+        assert "message.\n\nBien à vous," in got
+
+    def test_english_greeting_splits(self) -> None:
+        from twaky.sentinels.mail.nodes import _ensure_paragraph_breaks
+
+        got = _ensure_paragraph_breaks("Hi Karin, Yes we're interested.")
+        assert got.startswith("Hi Karin,\n\nYes we're interested.")
+
+    def test_collapses_triple_plus_newlines(self) -> None:
+        from twaky.sentinels.mail.nodes import _ensure_paragraph_breaks
+
+        assert _ensure_paragraph_breaks("A\n\n\n\nB") == "A\n\nB"
+
+    def test_empty_body_returns_empty(self) -> None:
+        from twaky.sentinels.mail.nodes import _ensure_paragraph_breaks
+
+        assert _ensure_paragraph_breaks("") == ""
+
+    def test_no_greeting_preserves_body(self) -> None:
+        from twaky.sentinels.mail.nodes import _ensure_paragraph_breaks
+
+        body = "Just a plain body without greeting."
+        assert _ensure_paragraph_breaks(body) == body

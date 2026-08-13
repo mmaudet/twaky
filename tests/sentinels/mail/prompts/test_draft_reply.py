@@ -42,11 +42,14 @@ def test_owner_style_profile_injected_when_owner_known() -> None:
     prompt = draft_reply_prompt(
         _state(), memories=[], owner_email="michel.maudet@linagora.com"
     )
-    # Signature block distinctive to Michel's profile
-    assert "Villa Good Tech" in prompt
-    assert "LINAGORA" in prompt
+    # Profile header identifies Michel-Marie Maudet by name + company.
+    assert "Michel-Marie Maudet" in prompt
+    assert "CEO of Linagora" in prompt
     # Greeting patterns
     assert "Bonjour," in prompt
+    # Signature block is deliberately NOT included in the prompt (the
+    # pipeline appends the canonical signature after the LLM output).
+    assert "37 Rue Pierre Poli" not in prompt
 
 
 def test_default_style_when_owner_unknown() -> None:
@@ -54,7 +57,7 @@ def test_default_style_when_owner_unknown() -> None:
     prompt = draft_reply_prompt(
         _state(), memories=[], owner_email="stranger@example.com"
     )
-    assert "Villa Good Tech" not in prompt
+    assert "Michel-Marie Maudet" not in prompt
     # Default style is generic
     assert "plainspoken" in prompt
 
