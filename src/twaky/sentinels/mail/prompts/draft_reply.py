@@ -9,6 +9,7 @@ from twaky.sentinels.mail.prompts.helpers import (
     today_for_llm,
     user_info_block,
 )
+from twaky.sentinels.mail.style_profile import get_style_profile
 
 DEFAULT_WRITING_STYLE = """Keep it concise, direct, and friendly.
 Keep the reply short. Aim for 2 sentences at most unless a brief answer to multiple questions needs more.
@@ -35,7 +36,12 @@ def draft_reply_prompt(
     Mirror the language of the latest message (ISO-639-1 language code).
     """
     thread: list[dict[str, Any]] = state.get("thread", [])
-    writing_style: str = state.get("writing_style", "") or DEFAULT_WRITING_STYLE
+    # Precedence: state override → owner-specific profile → generic default.
+    writing_style: str = (
+        state.get("writing_style", "")
+        or (get_style_profile(owner_email) if owner_email else None)
+        or DEFAULT_WRITING_STYLE
+    )
 
     # Build memories block only when non-empty
     memories_block = ""
@@ -68,8 +74,9 @@ def draft_reply_prompt(
         "Mirror the language of the latest message in the thread. "
         "Report the ISO-639-1 language code of the reply in the `language` field.\n\n"
         "IMPORTANT: Use placeholders sparingly! Only use them where you have limited information.\n"
-        "Never use placeholders for the user's name. You do not need to sign off with the user's name. "
-        "Do not add a signature.\n"
+        "Never use placeholders for the user's name. If the writing style below prescribes "
+        "a closing formula, signature block, or name, follow it verbatim. Otherwise, "
+        "do not add a signature.\n"
         "Do not invent information.\n"
         "Ground facts, terms, statuses, dates, approvals, attachments, completed actions, "
         "and external changes in the thread or provided context.\n"
