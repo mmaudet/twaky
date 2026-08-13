@@ -105,3 +105,94 @@ def test_second_tick_dispatches_draft_sent(monkeypatch):
         )
     diff_mock.assert_called_once()
     assert result.observations_created == 1  # one email dispatched → one observation
+
+
+@pytest.mark.integration
+def test_second_tick_dispatches_marked_spam(monkeypatch):
+    import asyncio
+
+    from twaky.config import settings
+    from twaky.sentinels.mail.store import mailbox_state as ms
+    from twaky.sentinels.mail.store.observations import ExtractionOutcome
+
+    monkeypatch.setattr(settings, "mail_sentinel_observer_enabled", True)
+    ms.upsert(mailbox_id="mbx-junk", jmap_state="state-0", role="junk", name="Junk")
+
+    adapter = FakeAdapter(
+        mailboxes=[{"id": "mbx-junk", "role": "junk", "name": "Junk"}],
+        changes_map={"mbx-junk": ("state-1", ["e2"])},
+        emails={
+            "e2": {
+                "id": "e2",
+                "from": [{"email": "spammer@bad.com"}],
+                "subject": "Buy now!!!",
+            }
+        },
+    )
+    with patch("twaky.sentinels.mail.observer.extract_reclassification") as reclass_mock:
+        reclass_mock.return_value = MagicMock(
+            outcome=ExtractionOutcome.EXTRACTED,
+            memory_ids=[],
+            pattern_ids=[],
+        )
+        result = asyncio.run(
+            MailObserver().run_tick(adapter, owner_email="mmaudet@linagora.com")
+        )
+    reclass_mock.assert_called_once()
+    call_kwargs = reclass_mock.call_args.kwargs
+    assert call_kwargs.get("direction") == "in"
+    assert result.observations_created == 1
+
+    # cleanup
+    from twaky.db import get_pool
+    with get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM mail_sentinel_mailbox_state WHERE mailbox_id = 'mbx-junk'")
+
+
+@pytest.mark.integration
+def test_second_tick_dispatches_moved_to_custom(monkeypatch):
+    import asyncio
+
+    from twaky.config import settings
+    from twaky.sentinels.mail.store import mailbox_state as ms
+    from twaky.sentinels.mail.store.observations import ExtractionOutcome
+
+    monkeypatch.setattr(settings, "mail_sentinel_observer_enabled", True)
+    ms.upsert(
+        mailbox_id="mbx-facturation",
+        jmap_state="state-0",
+        role=None,
+        name="Facturation",
+    )
+
+    adapter = FakeAdapter(
+        mailboxes=[{"id": "mbx-facturation", "role": None, "name": "Facturation"}],
+        changes_map={"mbx-facturation": ("state-1", ["e3"])},
+        emails={
+            "e3": {
+                "id": "e3",
+                "from": [{"email": "comptable@fournisseur.com"}],
+                "subject": "Facture N°2026-0812",
+            }
+        },
+    )
+    with patch("twaky.sentinels.mail.observer.extract_folder_move") as move_mock:
+        move_mock.return_value = MagicMock(
+            outcome=ExtractionOutcome.EXTRACTED,
+            memory_ids=[],
+            pattern_ids=[],
+        )
+        result = asyncio.run(
+            MailObserver().run_tick(adapter, owner_email="mmaudet@linagora.com")
+        )
+    move_mock.assert_called_once()
+    call_kwargs = move_mock.call_args.kwargs
+    assert call_kwargs.get("folder_name") == "Facturation"
+    assert result.observations_created == 1
+
+    # cleanup
+    from twaky.db import get_pool
+    with get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM mail_sentinel_mailbox_state WHERE mailbox_id = 'mbx-facturation'"
+        )

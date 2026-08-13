@@ -2,9 +2,11 @@
 
 ## Prerequisites
 
-- All 14 SP5b tasks merged to `main`.
+- All 15 SP5b tasks merged to `main`.
 - `mail_sentinel_observer_enabled=False` in `.env` (default).
 - Migration `012_init_write_side.sh` applied to twaky-pg.
+
+⚠️ **This playbook depends on 3 architectural fixes that were surfaced in the final review but deferred**: pipeline short-circuit routing for learned patterns (rule_name `label:*`, `trust_sender`, `block_sender`) is silent-dead until wired; observer never emits `unmarked_spam`; `Email/changes` is global (not per-mailbox). Do NOT flip `MAIL_SENTINEL_OBSERVER_ENABLED=true` in production until those 3 fixes ship and are validated on athena for 48h.
 
 ## Rollout Steps
 
@@ -151,6 +153,6 @@ If issues arise at any point:
   `mail_sentinel_learned_pattern`, `mail_sentinel_observation`). Original ingest 
   pipeline (`mail_sentinel_rule`) is unaffected.
 - **Performance**: Observer runs as a separate async task per `observer_tick` 
-  (default every 5 min). Does not block ingest.
+  (default every 60 s). Does not block ingest.
 - **Langfuse tracing**: All extraction calls are traced via `structured_call`. 
   Review traces if extraction_outcome='error'.

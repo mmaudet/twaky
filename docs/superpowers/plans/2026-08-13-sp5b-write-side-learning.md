@@ -3967,4 +3967,16 @@ No gaps identified. No placeholders. Type consistency: `ExtractionResult`, `Obse
 
 **2. Inline Execution** — Execute tasks in this session using executing-plans, batch execution with checkpoints.
 
+## Post-implementation status (2026-08-14)
+
+Branch `sp5b-write-side` complete: 15 tasks + gap-fill + rollout playbook. Feature flag `mail_sentinel_observer_enabled=False` by default.
+
+**Ships as scaffolding.** The final whole-branch review surfaced 3 architectural blockers that must be fixed before the flag is flipped in production:
+
+1. **Pipeline short-circuit routing**: `match_rules` emits `skip_spam_triage=True`, `bucket="spam"`, and `rule_name="label:*"|"trust_sender"|"block_sender"`, but `pipeline.py` never routes on those fields and `rules_store.by_name("label:*")` returns None. Goals #2 and #3 of the spec are silently unmet at runtime.
+2. **Observer `unmarked_spam` detection missing**: acknowledged in `observer.py:211-214`. Kills goal #2's "trust after 3 unmarks" workflow.
+3. **`Email/changes` is global not per-mailbox**: every watched mailbox in a tick fetches the same delta list and dispatches by polled mailbox's role, producing false observations.
+
+**Follow-up plan**: SP5c (write-side rollout fixes) — TBD.
+
 **Which approach?**
