@@ -495,6 +495,88 @@ async def _housekeeping(settings: Settings, stop_event: asyncio.Event) -> None:
         except Exception:
             log.exception("housekeeping: spam_decisions purge failed")
 
+        # SP5c 5.1: weekly learned-pattern health check.
+        try:
+            await _maybe_run_pattern_health_check(settings)
+        except Exception:
+            log.exception("housekeeping: pattern_health check failed")
+
+
+async def _maybe_run_pattern_health_check(settings: Settings) -> None:
+    """SP5c 5.1: run the LLM re-check of learned patterns at most once per week.
+
+    Tracks the last run timestamp via a magic row in
+    ``mail_sentinel_mailbox_state`` (key ``__pattern_health__``) — reusing
+    the existing table avoids a schema change for this one integer.
+    Only runs when ``settings.mail_sentinel_observer_enabled`` is True
+    (the health check depends on the observer's JMAP client).
+    """
+    if not settings.mail_sentinel_observer_enabled:
+        return
+
+    from datetime import UTC, datetime, timedelta
+
+    from twaky.sentinels.mail.store import mailbox_state as ms_store
+
+    HEALTH_KEY = "__pattern_health__"
+    HEALTH_INTERVAL_DAYS = 7
+
+    stored = ms_store.get(HEALTH_KEY)
+    if stored is not None:
+        elapsed = datetime.now(tz=UTC) - stored.updated_at
+        if elapsed < timedelta(days=HEALTH_INTERVAL_DAYS):
+            log.debug(
+                "pattern_health: last run %s ago (< %d days) — skipping",
+                elapsed,
+                HEALTH_INTERVAL_DAYS,
+            )
+            return
+
+    # Build a JmapObserverClient using the mail sentinel's OAuth creds.
+    try:
+        import httpx
+
+        from twaky.oauth import repository as oauth_repo
+        from twaky.oauth.refresh_manager import get_manager
+        from twaky.sentinels.mail.jmap_observer_client import JmapObserverClient
+        from twaky.sentinels.mail.pattern_health import run_pattern_health_check
+
+        cred = oauth_repo.get("mail")
+        if cred is None:
+            log.warning(
+                "pattern_health: no oauth_credential for sentinel 'mail' — skipping"
+            )
+            return
+        mgr = get_manager("mail")
+        token = await mgr.get_access_token()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                cred.session_url,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp.raise_for_status()
+            sess = resp.json()
+        api_url = sess["apiUrl"]
+        account_id = sess["primaryAccounts"]["urn:ietf:params:jmap:mail"]
+
+        observer_client = JmapObserverClient(
+            api_url=api_url,
+            access_token=token,
+            account_id=account_id,
+        )
+
+        stats = await run_pattern_health_check(observer_client)
+        log.info("pattern_health: weekly run complete stats=%r", stats)
+
+        ms_store.upsert(
+            mailbox_id=HEALTH_KEY,
+            jmap_state="ok",
+            role=None,
+            name=HEALTH_KEY,
+        )
+    except Exception:
+        log.exception("pattern_health: weekly run failed")
+
 
 __all__ = [
     "SentinelRuntime",

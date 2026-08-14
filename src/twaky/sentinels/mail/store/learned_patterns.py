@@ -180,6 +180,88 @@ def list_all(*, active_only: bool = False) -> list[LearnedPattern]:
     return [_row_to_pattern(r) for r in rows]
 
 
+def mark_confirmed(sender_email: str, rule_name: str) -> LearnedPattern | None:
+    """SP5c 5.1: bump ``last_confirmed=now()`` when a health check LLM
+    verdict confirmed the pattern still fits a recent mail from *sender_email*.
+
+    Returns the updated row or None if the pattern no longer exists.
+    """
+    sender_email = sender_email.lower()
+    sql = (
+        "UPDATE mail_sentinel_learned_pattern "
+        "SET last_confirmed = now() "
+        "WHERE sender_email = %s AND rule_name = %s "
+        "RETURNING *"
+    )
+    with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(sql, (sender_email, rule_name))
+        row = cur.fetchone()
+    return _row_to_pattern(row) if row else None
+
+
+def decay_confidence(
+    sender_email: str,
+    rule_name: str,
+    *,
+    factor: Decimal = Decimal("0.7"),
+    delete_below: Decimal = Decimal("0.5"),
+) -> LearnedPattern | None:
+    """SP5c 5.1: multiply ``confidence`` by *factor* to weaken a drifted
+    pattern. If the result falls below *delete_below*, the row is
+    DELETED entirely (returned None).
+
+    Used by the pattern health check when an LLM verdict disagrees with
+    a stored pattern (sender changed behaviour, false-positive stabilised).
+    """
+    sender_email = sender_email.lower()
+    # Fetch → compute → either update or delete.
+    fetch_sql = (
+        "SELECT * FROM mail_sentinel_learned_pattern "
+        "WHERE sender_email = %s AND rule_name = %s"
+    )
+    with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(fetch_sql, (sender_email, rule_name))
+        row = cur.fetchone()
+    if row is None:
+        return None
+
+    old_conf = Decimal(str(row["confidence"]))
+    new_conf = old_conf * factor
+    if new_conf < delete_below:
+        forget(sender_email, rule_name)
+        return None
+
+    upd = (
+        "UPDATE mail_sentinel_learned_pattern "
+        "SET confidence = %s "
+        "WHERE sender_email = %s AND rule_name = %s "
+        "RETURNING *"
+    )
+    with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(upd, (new_conf, sender_email, rule_name))
+        row = cur.fetchone()
+    return _row_to_pattern(row) if row else None
+
+
+def list_active_stale(days: int, *, limit: int = 5) -> list[LearnedPattern]:
+    """SP5c 5.1: return up to *limit* ACTIVE patterns whose ``last_confirmed``
+    is older than *days*, ordered oldest-first.
+
+    Used by the health check to pick which patterns to re-verify this tick.
+    """
+    sql = (
+        "SELECT * FROM mail_sentinel_learned_pattern "
+        "WHERE confidence >= %s AND evidence_count >= %s "
+        "  AND last_confirmed < now() - make_interval(days => %s) "
+        "ORDER BY last_confirmed ASC "
+        "LIMIT %s"
+    )
+    with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(sql, (ACTIVATION_THRESHOLD, MIN_EVIDENCE, days, limit))
+        rows = cur.fetchall()
+    return [_row_to_pattern(r) for r in rows]
+
+
 def forget(sender_email: str, rule_name: str) -> None:
     """Delete the pattern identified by (sender_email lowercase, rule_name).
 
@@ -199,7 +281,10 @@ __all__ = [
     "MIN_EVIDENCE",
     "LearnedPattern",
     "by_sender",
+    "decay_confidence",
     "forget",
+    "list_active_stale",
     "list_all",
+    "mark_confirmed",
     "record_decision",
 ]
