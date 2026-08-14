@@ -361,6 +361,12 @@ async def _process_with_bookkeeping(
     outcome = Outcome.PROCESSED
     error_repr: str | None = None
 
+    # SP5c 5.2 fix: reset the per-event trace accumulator. ``ctx`` is
+    # built ONCE per sentinel at startup and reused across events, so
+    # ``ctx.trace`` would otherwise accumulate entries from previous
+    # events into the same sentinel_run.trace row.
+    ctx.trace = []
+
     try:
         async with asyncio.timeout(float(settings.sentinel_timeout_s)):
             result: Outcome = await asyncio.to_thread(inst.process, event, ctx)
