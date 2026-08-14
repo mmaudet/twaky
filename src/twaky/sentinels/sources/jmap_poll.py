@@ -252,7 +252,14 @@ class JmapPollingEventSource(EventSource):
         account_id: str,
         since_state: str,
     ) -> tuple[str, list[str]]:
-        """Run Email/changes.  Return ``(newState, created_ids)``."""
+        """Run Email/changes.  Return ``(newState, created_ids)``.
+
+        Recovery: when James returns ``cannotCalculateChanges`` (the delta
+        exceeds ``maxChanges``, typically after the poller has been paused
+        for hours), re-seed to the current state via ``Email/get {ids: []}``
+        and return an empty ``created`` list. Missed messages are skipped —
+        acceptable trade-off vs the poller crashing indefinitely.
+        """
         body = {
             "using": _JMAP_USING,
             "methodCalls": [
@@ -271,7 +278,34 @@ class JmapPollingEventSource(EventSource):
         resp = await client.post(api_url, json=body, headers=headers)
         resp.raise_for_status()
         data = resp.json()
-        result = data["methodResponses"][0][1]
+        method_name, result, _ = data["methodResponses"][0]
+
+        # Error branch: recover from cannotCalculateChanges by re-seeding.
+        if method_name == "error":
+            err_type = result.get("type", "unknown")
+            log.warning(
+                "jmap_poll: Email/changes returned error type=%r (sinceState=%s); "
+                "re-seeding state, skipping missed messages",
+                err_type,
+                since_state,
+            )
+            reseed_body = {
+                "using": _JMAP_USING,
+                "methodCalls": [
+                    [
+                        "Email/get",
+                        {"accountId": account_id, "ids": []},
+                        "0",
+                    ]
+                ],
+            }
+            reseed_resp = await client.post(api_url, json=reseed_body, headers=headers)
+            reseed_resp.raise_for_status()
+            reseed_data = reseed_resp.json()
+            reseed_result = reseed_data["methodResponses"][0][1]
+            fresh_state = str(reseed_result.get("state") or since_state)
+            return fresh_state, []
+
         new_state: str = result["newState"]
         created: list[str] = result.get("created", []) or []
         return new_state, created

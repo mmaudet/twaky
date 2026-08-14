@@ -139,9 +139,12 @@ class JmapObserverClient:
         """Return the current global Email/state (used for bootstrap).
 
         SP5c: replaces the per-mailbox ``get_mailbox_state`` for the
-        observer's tick logic. Runs ``Email/query`` with limit=0 which
-        returns the current query state string (semantically equivalent
-        to the ``state`` needed for Email/changes sinceState).
+        observer's tick logic. Uses ``Email/get`` with an empty ``ids``
+        list — the response's ``state`` field is the collection state
+        that ``Email/changes`` accepts as ``sinceState``.
+
+        (Email/query's ``queryState`` is a different state and Email/
+        changes rejects it — verified on James JMAP 2026-08.)
 
         Falls back to an empty string on unexpected response shape.
         """
@@ -149,8 +152,8 @@ class JmapObserverClient:
             "using": _JMAP_USING,
             "methodCalls": [
                 [
-                    "Email/query",
-                    {"accountId": self.account_id, "limit": 0},
+                    "Email/get",
+                    {"accountId": self.account_id, "ids": []},
                     "0",
                 ]
             ],
@@ -162,9 +165,8 @@ class JmapObserverClient:
             resp.raise_for_status()
         data = resp.json()
         for method, response, _ in data.get("methodResponses", []):
-            if method == "Email/query":
-                # Prefer queryState; fall back to state.
-                return str(response.get("queryState") or response.get("state") or "")
+            if method == "Email/get":
+                return str(response.get("state") or "")
         return ""
 
     async def changes(
