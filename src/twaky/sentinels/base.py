@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar, Literal, TypedDict
 
@@ -73,6 +73,13 @@ class Context:
     delegation: Any
     sentinel_row: Any
     logger: logging.Logger
+    # SP5c 5.2: mutable trace accumulator. Nodes / sentinels append
+    # decision-summary dicts here during process(); the runtime persists
+    # the resulting list into ``sentinel_run.trace`` after the call.
+    # Each entry should carry at minimum a ``node`` key naming the pipeline
+    # stage, and any other fields relevant to explaining the decision
+    # (matched_by, rule_name, actions_applied, memory_ids, spam_bucket, ...).
+    trace: list[dict[str, Any]] = field(default_factory=list)
 
 
 class Sentinel(ABC):

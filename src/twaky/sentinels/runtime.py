@@ -399,6 +399,12 @@ async def _process_with_bookkeeping(
     if error_repr is not None:
         patch["error_repr"] = error_repr
 
+    # SP5c 5.2: persist the decision trace accumulated by the sentinel
+    # into sentinel_run.trace so the /sentinels/mail/runs/[id] page can
+    # explain WHY the pipeline reached this outcome.
+    if getattr(ctx, "trace", None):
+        patch["trace"] = ctx.trace
+
     await asyncio.to_thread(repository.update_run, run.id, patch)
 
     return outcome

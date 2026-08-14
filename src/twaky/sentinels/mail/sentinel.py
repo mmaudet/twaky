@@ -25,6 +25,101 @@ from twaky.sentinels.mail.pipeline import process_email
 log = logging.getLogger(__name__)
 
 
+def _emit_decision_trace(ctx: Context, email_id: str, state: Any) -> None:
+    """SP5c 5.2: append a structured decision trace to ``ctx.trace``.
+
+    Reconstructed post-hoc from the final pipeline state — no need to
+    instrument every node individually. Each entry names the pipeline
+    stage plus the fields that explain WHY the pipeline took its
+    decision, so the /sentinels/mail/runs/[id] page can render them.
+
+    Order of entries reflects execution order in the SP5c pipeline:
+    load_thread → match_rules → [spam_triage] → apply_actions →
+    thread_status → [select_memories → draft_reply].
+    """
+    thread = state.get("thread") or []
+    latest = thread[-1] if thread else {}
+    sender = ""
+    from_field = latest.get("from") or []
+    if isinstance(from_field, list) and from_field:
+        first = from_field[0]
+        if isinstance(first, dict):
+            sender = str(first.get("email") or "").lower()
+
+    ctx.trace.append(
+        {
+            "node": "load_thread",
+            "email_id": email_id,
+            "sender": sender,
+            "subject": latest.get("subject") or "",
+            "thread_len": len(thread),
+        }
+    )
+
+    matched_by = state.get("matched_by")
+    rule_name = state.get("rule_name")
+    match_entry: dict[str, Any] = {
+        "node": "match_rules",
+        "matched_by": matched_by,
+        "rule_name": rule_name,
+    }
+    # Flag learned-pattern short-circuits explicitly so the UI can
+    # emphasize "no LLM was called for this decision".
+    if matched_by == "learned_pattern":
+        match_entry["short_circuit"] = True
+        if state.get("skip_spam_triage"):
+            match_entry["skip_spam_triage"] = True
+        if state.get("bucket"):
+            match_entry["forced_bucket"] = state["bucket"]
+    ctx.trace.append(match_entry)
+
+    # spam_triage only runs on non-learned_pattern paths in SP5c.
+    if matched_by != "learned_pattern":
+        ctx.trace.append(
+            {
+                "node": "spam_triage",
+                "spam_bucket": state.get("spam_bucket"),
+                "spam_reason": state.get("spam_reason"),
+                "spam_score": state.get("spam_score"),
+            }
+        )
+
+    ctx.trace.append(
+        {
+            "node": "apply_actions",
+            "actions_applied": state.get("actions_applied") or [],
+        }
+    )
+
+    status = state.get("status")
+    ctx.trace.append(
+        {
+            "node": "thread_status",
+            "status": str(status) if status is not None else None,
+        }
+    )
+
+    memories = state.get("memories") or []
+    if memories:
+        ctx.trace.append(
+            {
+                "node": "select_memories",
+                "count": len(memories),
+                "memory_ids": [m.get("id") for m in memories if isinstance(m, dict)][:16],
+            }
+        )
+
+    draft = state.get("draft")
+    if draft:
+        ctx.trace.append(
+            {
+                "node": "draft_reply",
+                "draft_language": state.get("draft_language"),
+                "draft_preview": (draft[:200] + "…") if len(draft) > 200 else draft,
+            }
+        )
+
+
 class MailSentinel(Sentinel):
     """Sentinel that classifies incoming mail and drafts replies.
 
@@ -69,6 +164,10 @@ class MailSentinel(Sentinel):
         )
 
         state = process_email(node_ctx, email_id)
+
+        # SP5c 5.2: emit a decision trace into ctx.trace so the runtime
+        # can persist it into sentinel_run.trace for the UI.
+        _emit_decision_trace(ctx, email_id, state)
 
         if state.get("draft"):
             return Outcome.MISSION_CREATED
