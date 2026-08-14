@@ -156,7 +156,30 @@ STYLE_PROFILES: dict[str, str] = {
 
 
 def get_style_profile(owner_email: str) -> str | None:
-    """Return the writing-style profile for *owner_email*, or None if unknown."""
+    """Return the writing-style profile for *owner_email*.
+
+    Resolution order (SP7 / Task 141):
+    1. Auto-computed profile from ``mail_sentinel_style_profile`` (DB).
+    2. Static per-owner profile in ``STYLE_PROFILES``.
+    3. ``None`` — falls back to ``DEFAULT_WRITING_STYLE`` in the caller.
+
+    Any failure looking up the DB (e.g. Postgres unreachable) degrades
+    silently to the static path — the draft path must never break just
+    because the auto-profile store is down.
+    """
+    # 1. DB-first: auto-computed by SP7 analyzer
+    try:
+        from twaky.sentinels.mail.store import style_profile as sp_store
+        row = sp_store.get(owner_email)
+        if row is not None and row.profile:
+            return row.profile
+    except Exception as _e:  # noqa: BLE001 — degrade to static on any DB issue
+        import logging as _logging
+        _logging.getLogger(__name__).debug(
+            "style_profile: DB lookup failed, falling back to static: %r", _e
+        )
+
+    # 2. Static fallback
     return STYLE_PROFILES.get(owner_email.lower().strip())
 
 

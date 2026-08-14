@@ -208,5 +208,88 @@ class JmapObserverClient:
                 return emails[0] if emails else None
         return None
 
+    async def get_mailbox_total(self, mailbox_id: str) -> int:
+        """Return the ``totalEmails`` count for the given mailbox.
+
+        Used by SP7 style-analysis to decide when to trigger a fresh
+        analysis (delta vs stored ``sent_count_at_compute``).
+        """
+        payload = {
+            "using": _JMAP_USING,
+            "methodCalls": [
+                [
+                    "Mailbox/get",
+                    {
+                        "accountId": self.account_id,
+                        "ids": [mailbox_id],
+                        "properties": ["totalEmails"],
+                    },
+                    "0",
+                ]
+            ],
+        }
+        async with self._make_client() as client:
+            resp = await client.post(
+                self.api_url, json=payload, headers=self._headers()
+            )
+            resp.raise_for_status()
+        data = resp.json()
+        for method, response, _ in data.get("methodResponses", []):
+            if method == "Mailbox/get":
+                lst = response.get("list", [])
+                if lst:
+                    return int(lst[0].get("totalEmails", 0))
+        return 0
+
+    async def list_recent_emails(
+        self, mailbox_id: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """List the most recent emails in a mailbox with body text.
+
+        Uses Email/query (ordered by receivedAt DESC) then Email/get in
+        a single JMAP round-trip via result-references. Returns dicts
+        with subject + body (plain text assembled from textBody/bodyValues).
+        """
+        payload = {
+            "using": _JMAP_USING,
+            "methodCalls": [
+                [
+                    "Email/query",
+                    {
+                        "accountId": self.account_id,
+                        "filter": {"inMailbox": mailbox_id},
+                        "sort": [{"property": "receivedAt", "isAscending": False}],
+                        "limit": limit,
+                    },
+                    "q",
+                ],
+                [
+                    "Email/get",
+                    {
+                        "accountId": self.account_id,
+                        "#ids": {
+                            "resultOf": "q",
+                            "name": "Email/query",
+                            "path": "/ids",
+                        },
+                        "properties": ["id", "subject", "textBody", "bodyValues"],
+                        "fetchTextBodyValues": True,
+                        "maxBodyValueBytes": 8192,
+                    },
+                    "g",
+                ],
+            ],
+        }
+        async with self._make_client() as client:
+            resp = await client.post(
+                self.api_url, json=payload, headers=self._headers()
+            )
+            resp.raise_for_status()
+        data = resp.json()
+        for method, response, _ in data.get("methodResponses", []):
+            if method == "Email/get":
+                return list(response.get("list", []))
+        return []
+
 
 __all__ = ["JmapObserverClient"]

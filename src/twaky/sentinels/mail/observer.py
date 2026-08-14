@@ -84,13 +84,27 @@ class MailObserver:
         mailboxes = await self._watched_mailboxes(adapter)
         result.mailboxes_polled = len(mailboxes)
 
+        sent_mailbox: dict | None = None
         for mbx in mailboxes:
+            if (mbx.get("role") or "").lower() == "sent":
+                sent_mailbox = mbx
             try:
                 await self._tick_mailbox(adapter, mbx, owner_email, result)
             except Exception as e:  # noqa: BLE001
                 log.warning("observer: mailbox %s failed: %r", mbx.get("id"), e)
                 result.errors.append(f"{mbx.get('id')}: {e!r}")
                 continue
+
+        # SP7 / Task 141: writing-style analysis (best-effort, gated on
+        # `should_analyze` — no LLM call unless delta threshold reached).
+        if sent_mailbox is not None:
+            try:
+                await self._maybe_run_style_analysis(
+                    adapter, owner_email, sent_mailbox
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("observer: style analysis failed: %r", e)
+                result.errors.append(f"style_analysis: {e!r}")
 
         log.info(
             "observer_tick_done polled=%d obs=%d mem=%d pat=%d errs=%d",
@@ -101,6 +115,57 @@ class MailObserver:
             len(result.errors),
         )
         return result
+
+    async def _maybe_run_style_analysis(
+        self, adapter: Any, owner_email: str, sent_mailbox: dict
+    ) -> None:
+        """Trigger style analysis when the Sent-delta threshold is reached.
+
+        Fetches ``totalEmails`` for the Sent mailbox and delegates to
+        ``analyze_style.should_analyze`` for the actual gating. When it
+        fires, pulls the last ``SAMPLE_SIZE`` sent mails and runs the
+        LLM analysis + upsert.
+        """
+        from twaky.sentinels.mail import analyze_style as az
+
+        if not owner_email:
+            return
+
+        sent_mailbox_id = sent_mailbox["id"]
+        current_total = await adapter.get_mailbox_total(sent_mailbox_id)
+        if not az.should_analyze(owner_email, current_total):
+            return
+
+        raw_samples = await adapter.list_recent_emails(
+            sent_mailbox_id, limit=az.SAMPLE_SIZE
+        )
+        samples = [
+            {
+                "subject": s.get("subject") or "",
+                "body": _extract_body_text(s),
+            }
+            for s in raw_samples
+        ]
+        display_name = owner_email.split("@")[0]
+
+        log.info(
+            "analyze_style: triggered for %s (total=%d, samples=%d)",
+            owner_email,
+            current_total,
+            len(samples),
+        )
+        stored = az.run_analysis(
+            owner_email=owner_email,
+            display_name=display_name,
+            current_sent_count=current_total,
+            samples=samples,
+        )
+        if stored:
+            log.info(
+                "analyze_style: profile stored for %s (sample_size=%d)",
+                owner_email,
+                stored.sample_size,
+            )
 
     async def _watched_mailboxes(self, adapter: Any) -> list[dict]:
         all_mbx = await adapter.query_mailboxes()

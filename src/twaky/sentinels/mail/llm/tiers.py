@@ -25,6 +25,8 @@ class UseCase(str, Enum):
     # SP5b extractors
     EXTRACT_MEMORY_DIFF = "extract_memory_diff"
     EXTRACT_MEMORY_MOVE = "extract_memory_move"
+    # SP7 / Task 141: writing-style analysis
+    ANALYZE_STYLE = "analyze_style"
 
 
 _MAPPING: dict[UseCase, Tier] = {
@@ -37,6 +39,7 @@ _MAPPING: dict[UseCase, Tier] = {
     UseCase.SPAM_CHECK: Tier.ECONOMY,
     UseCase.EXTRACT_MEMORY_DIFF: Tier.CHAT,
     UseCase.EXTRACT_MEMORY_MOVE: Tier.ECONOMY,
+    UseCase.ANALYZE_STYLE: Tier.CHAT,
 }
 
 
