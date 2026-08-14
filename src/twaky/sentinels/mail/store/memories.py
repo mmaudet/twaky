@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class MailMemory:
-    """Frozen mirror of the ``mail_sentinel_memory`` table row (8 columns)."""
+    """Frozen mirror of the ``mail_sentinel_memory`` table row."""
 
     id: UUID
     kind: str
@@ -36,7 +36,11 @@ class MailMemory:
     content: str
     evidence: list[Any]
     created_at: datetime
-    expires_at: datetime
+    expires_at: datetime | None  # NULL when "keep permanent"
+    source: str = "manual"
+    sender_email: str | None = None
+    mission_id: UUID | None = None
+    confidence: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -100,9 +104,13 @@ def _row_to_memory(row: dict[str, Any]) -> MailMemory:
         scope=row["scope"],
         scope_value=row["scope_value"],
         content=row["content"],
-        evidence=row["evidence"] or [],
+        evidence=row.get("evidence") or [],
         created_at=row["created_at"],
         expires_at=row["expires_at"],
+        source=row.get("source", "manual"),
+        sender_email=row.get("sender_email"),
+        mission_id=row.get("mission_id"),
+        confidence=(float(row["confidence"]) if row.get("confidence") is not None else None),
     )
 
 
@@ -118,26 +126,18 @@ def insert(
     scope_value: str,
     content: str,
     evidence: list[Any] | None = None,
+    source: str = "manual",
+    sender_email: str | None = None,
+    mission_id: UUID | None = None,
+    confidence: float | None = None,
 ) -> MailMemory | None:
     """Insert a memory row, returning None on duplicate or public-domain refusal.
 
-    Parameters
-    ----------
-    kind:
-        One of ``'fact'``, ``'procedure'``, ``'preference'``.
-    scope:
-        One of ``'sender'``, ``'domain'``, ``'global'``.
-    scope_value:
-        Normalized to lowercase + stripped.
-    content:
-        Normalized: internal whitespace collapsed.
-    evidence:
-        Optional list of evidence dicts (stored as JSONB).
-
-    Returns
-    -------
-    MailMemory | None
-        The inserted row, or None if refused (public domain) or duplicate.
+    Extra fields introduced in SP5b:
+      - source: 'manual' | 'auto_diff' | 'auto_reclass' | 'auto_move'
+      - sender_email: dénormalisation pour indexation quand scope='sender'
+      - mission_id: trace la mission d'origine (audit)
+      - confidence: 0..1, utilisée par le ranking d'injection
     """
     import json
 
@@ -156,12 +156,16 @@ def insert(
 
     sql = (
         "INSERT INTO mail_sentinel_memory "
-        "(kind, scope, scope_value, content, evidence) "
-        "VALUES (%s, %s, %s, %s, %s::jsonb) "
+        "(kind, scope, scope_value, content, evidence, "
+        " source, sender_email, mission_id, confidence) "
+        "VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s) "
         "ON CONFLICT (kind, scope, scope_value, content) DO NOTHING "
         "RETURNING *"
     )
-    params = [kind, scope, scope_value, content, json.dumps(evidence)]
+    params = [
+        kind, scope, scope_value, content, json.dumps(evidence),
+        source, sender_email, mission_id, confidence,
+    ]
 
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(sql, params)
@@ -263,12 +267,110 @@ def purge_expired() -> int:
         return cur.rowcount
 
 
+def touch(ids: list[UUID]) -> int:
+    """Push ``expires_at`` to now() + 7 days for rows in *ids*.
+
+    Skips rows where ``expires_at IS NULL`` ("keep permanent"). Returns
+    the number of rows actually updated.
+    """
+    if not ids:
+        return 0
+    sql = (
+        "UPDATE mail_sentinel_memory "
+        "SET expires_at = now() + INTERVAL '7 days' "
+        "WHERE id = ANY(%s) AND expires_at IS NOT NULL"
+    )
+    with get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (list(ids),))
+        return cur.rowcount
+
+
+def list_for_prompt(
+    *,
+    sender_email: str,
+    sender_domain: str,
+    limit: int = 16,
+) -> list[MailMemory]:
+    """Return memories ranked by scope × confidence × age decay.
+
+    Ranking = scope_weight × confidence × exp(-age_days / 30):
+      - scope=sender → weight 3.0
+      - scope=domain → weight 1.5
+      - scope=global → weight 1.0
+    Rows with expires_at in the past are excluded; rows with
+    expires_at IS NULL are always eligible.
+    """
+    sql = """
+        WITH candidates AS (
+          SELECT id, kind, scope, scope_value, content, evidence,
+                 created_at, expires_at, source, sender_email,
+                 mission_id, confidence,
+                 (CASE scope
+                    WHEN 'sender' THEN 3.0
+                    WHEN 'domain' THEN 1.5
+                    WHEN 'global' THEN 1.0
+                    ELSE 0.5
+                  END) AS scope_weight,
+                 COALESCE(confidence, 0.5) AS conf,
+                 EXTRACT(EPOCH FROM (now() - created_at)) / 86400.0 AS age_days
+          FROM mail_sentinel_memory
+          WHERE ((scope = 'sender' AND scope_value = %s)
+              OR (scope = 'domain' AND scope_value = %s)
+              OR (scope = 'global'))
+            AND (expires_at IS NULL OR expires_at > now())
+        )
+        SELECT *
+        FROM candidates
+        ORDER BY (scope_weight * conf * exp(-age_days / 30.0)) DESC
+        LIMIT %s
+    """
+    with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(sql, (sender_email.lower(), sender_domain.lower(), limit))
+        return [_row_to_memory(r) for r in cur.fetchall()]
+
+
+def delete(memory_id: UUID) -> bool:
+    """Delete a memory row by id.
+
+    Returns True if a row was deleted, False if the id was not found.
+    """
+    sql = "DELETE FROM mail_sentinel_memory WHERE id = %s"
+    with get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, (memory_id,))
+        return cur.rowcount > 0
+
+
+def set_persist(memory_id: UUID, persist: bool) -> MailMemory | None:
+    """Toggle a memory between permanent (expires_at=NULL) and 7-day TTL."""
+    if persist:
+        sql = (
+            "UPDATE mail_sentinel_memory SET expires_at = NULL "
+            "WHERE id = %s RETURNING *"
+        )
+        params: tuple[Any, ...] = (memory_id,)
+    else:
+        sql = (
+            "UPDATE mail_sentinel_memory "
+            "SET expires_at = now() + INTERVAL '7 days' "
+            "WHERE id = %s RETURNING *"
+        )
+        params = (memory_id,)
+    with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(sql, params)
+        row = cur.fetchone()
+    return _row_to_memory(row) if row else None
+
+
 __all__ = [
     "PUBLIC_EMAIL_DOMAINS",
     "MailMemory",
     "candidate_pool",
+    "delete",
     "get_many",
     "insert",
+    "list_for_prompt",
     "list_recent",
     "purge_expired",
+    "set_persist",
+    "touch",
 ]

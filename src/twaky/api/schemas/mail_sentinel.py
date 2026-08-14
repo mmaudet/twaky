@@ -91,7 +91,10 @@ class MailMemorySummary(BaseModel):
     scope_value: str
     content: str
     created_at: datetime
-    expires_at: datetime
+    expires_at: datetime | None
+    source: str = "manual"
+    confidence: float | None = None
+    mission_id: UUID | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +165,22 @@ class MailRuleProposeResponse(BaseModel):
     simulation_partial_reason: str | None
 
 
+class MemoryPersistRequest(BaseModel):
+    persist: bool
+
+
+class ObservationSummary(BaseModel):
+    id: UUID
+    email_id: str
+    mailbox_id: str
+    observation_type: str
+    observed_at: datetime
+    extraction_outcome: str
+    memory_ids: list[UUID]
+    pattern_ids: list[UUID]
+    error_repr: str | None = None
+
+
 __all__ = [
     "LearnedPatternSummary",
     "MailMemorySummary",
@@ -172,5 +191,7 @@ __all__ = [
     "MailRuleProposeResponse",
     "MailRuleSummary",
     "MatchedExample",
+    "MemoryPersistRequest",
+    "ObservationSummary",
     "ProposeWindow",
 ]

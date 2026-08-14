@@ -1060,6 +1060,97 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/memories/{memory_id}:
+    patch:
+      tags:
+      - mail-sentinel
+      summary: Patch Memory
+      description: Toggle a memory between permanent (persist=True) and 7-day TTL
+        (persist=False).
+      operationId: patch_memory_mail_sentinel_memories__memory_id__patch
+      parameters:
+      - name: memory_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Memory Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryPersistRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMemorySummary'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - mail-sentinel
+      summary: Delete Memory
+      description: Hard-delete a memory. Returns 404 if not found.
+      operationId: delete_memory_mail_sentinel_memories__memory_id__delete
+      parameters:
+      - name: memory_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Memory Id
+      responses:
+        '204':
+          description: Successful Response
+        '404':
+          description: memory_not_found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /mail-sentinel/observations:
+    get:
+      tags:
+      - mail-sentinel
+      summary: List Observations
+      description: Return recently recorded observations ordered by observed_at DESC.
+      operationId: list_observations_mail_sentinel_observations_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ObservationSummary'
+                title: Response List Observations Mail Sentinel Observations Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /mail-sentinel/auth:
     get:
       tags:
@@ -1574,9 +1665,26 @@ components:
           format: date-time
           title: Created At
         expires_at:
-          type: string
-          format: date-time
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
           title: Expires At
+        source:
+          type: string
+          title: Source
+          default: manual
+        confidence:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Confidence
+        mission_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Mission Id
       type: object
       required:
       - id
@@ -1970,6 +2078,15 @@ components:
       - would_shadow_by
       title: MatchedExample
       description: A single matched example row in the propose response.
+    MemoryPersistRequest:
+      properties:
+        persist:
+          type: boolean
+          title: Persist
+      type: object
+      required:
+      - persist
+      title: MemoryPersistRequest
     Mission:
       properties:
         id:
@@ -2051,6 +2168,56 @@ components:
       - failed
       - cancelled
       title: MissionState
+    ObservationSummary:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        email_id:
+          type: string
+          title: Email Id
+        mailbox_id:
+          type: string
+          title: Mailbox Id
+        observation_type:
+          type: string
+          title: Observation Type
+        observed_at:
+          type: string
+          format: date-time
+          title: Observed At
+        extraction_outcome:
+          type: string
+          title: Extraction Outcome
+        memory_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Memory Ids
+        pattern_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Pattern Ids
+        error_repr:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Repr
+      type: object
+      required:
+      - id
+      - email_id
+      - mailbox_id
+      - observation_type
+      - observed_at
+      - extraction_outcome
+      - memory_ids
+      - pattern_ids
+      title: ObservationSummary
     PlanStep:
       properties:
         agent:
@@ -2086,6 +2253,7 @@ components:
           default: recent
         count:
           type: integer
+          maximum: 2000.0
           minimum: 1.0
           title: Count
           default: 200

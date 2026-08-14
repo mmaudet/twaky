@@ -38,6 +38,9 @@ class MailAgentState(TypedDict, total=False):
     llm_calls: int
     spam_bucket: str | None
     spam_decision_id: UUID | None
+    memories: list[dict[str, Any]] | None
+    skip_spam_triage: bool | None
+    bucket: str | None
 
 
 __all__ = ["MailAgentState", "ThreadStatus"]

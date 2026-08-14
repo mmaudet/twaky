@@ -605,6 +605,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mail-sentinel/memories/{memory_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Memory
+         * @description Hard-delete a memory. Returns 404 if not found.
+         */
+        delete: operations["delete_memory_mail_sentinel_memories__memory_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Patch Memory
+         * @description Toggle a memory between permanent (persist=True) and 7-day TTL (persist=False).
+         */
+        patch: operations["patch_memory_mail_sentinel_memories__memory_id__patch"];
+        trace?: never;
+    };
+    "/mail-sentinel/observations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Observations
+         * @description Return recently recorded observations ordered by observed_at DESC.
+         */
+        get: operations["list_observations_mail_sentinel_observations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mail-sentinel/auth": {
         parameters: {
             query?: never;
@@ -923,11 +967,17 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Expires At */
+            expires_at: string | null;
             /**
-             * Expires At
-             * Format: date-time
+             * Source
+             * @default manual
              */
-            expires_at: string;
+            source: string;
+            /** Confidence */
+            confidence?: number | null;
+            /** Mission Id */
+            mission_id?: string | null;
         };
         /**
          * MailRuleCreate
@@ -1168,6 +1218,11 @@ export interface components {
             /** Would Shadow By */
             would_shadow_by: string | null;
         };
+        /** MemoryPersistRequest */
+        MemoryPersistRequest: {
+            /** Persist */
+            persist: boolean;
+        };
         /** Mission */
         Mission: {
             /**
@@ -1216,6 +1271,33 @@ export interface components {
          * @enum {string}
          */
         MissionState: "declared" | "planning" | "running" | "awaiting_user" | "done" | "failed" | "cancelled";
+        /** ObservationSummary */
+        ObservationSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Email Id */
+            email_id: string;
+            /** Mailbox Id */
+            mailbox_id: string;
+            /** Observation Type */
+            observation_type: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Extraction Outcome */
+            extraction_outcome: string;
+            /** Memory Ids */
+            memory_ids: string[];
+            /** Pattern Ids */
+            pattern_ids: string[];
+            /** Error Repr */
+            error_repr?: string | null;
+        };
         /** PlanStep */
         PlanStep: {
             /** Agent */
@@ -2722,6 +2804,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MailRuleProposeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_memory_mail_sentinel_memories__memory_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description memory_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_memory_mail_sentinel_memories__memory_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryPersistRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailMemorySummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_observations_mail_sentinel_observations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationSummary"][];
                 };
             };
             /** @description Validation Error */

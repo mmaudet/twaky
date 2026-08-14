@@ -1,0 +1,19 @@
+name: reclassification_3_samples
+
+description: >
+  Three consecutive unmark_spam events for the same sender should
+  activate a trust_sender pattern (confidence >= 0.9, evidence >= 3).
+
+sequence:
+  - action: unmark_spam
+    sender_email: newsletter@medium.com
+  - action: unmark_spam
+    sender_email: newsletter@medium.com
+  - action: unmark_spam
+    sender_email: newsletter@medium.com
+
+expected:
+  patterns:
+    - sender_email: newsletter@medium.com
+      rule_name: trust_sender
+      is_active: true

@@ -155,6 +155,10 @@ class Settings(BaseSettings):
     mail_sentinel_api_base: str = Field(default="")
     mail_sentinel_api_key: str = Field(default="")
 
+    # --- SP5b: write-side observer ---
+    mail_sentinel_observer_enabled: bool = Field(default=False)
+    mail_sentinel_watched_mailbox_roles: str = Field(default="sent,junk,trash")
+
     # --- Sub-project 3a: API ---
     api_base_url: str = Field(default="http://twaky-api:8000")
     api_session_secret: str = Field(default="")
@@ -172,6 +176,14 @@ class Settings(BaseSettings):
             f"postgresql://{self.twaky_pg_user}:{self.twaky_pg_password}"
             f"@{self.twaky_pg_host}:{self.twaky_pg_port}/{self.twaky_pg_db}"
         )
+
+    @property
+    def watched_mailbox_roles_list(self) -> list[str]:
+        return [
+            r.strip().lower()
+            for r in self.mail_sentinel_watched_mailbox_roles.split(",")
+            if r.strip()
+        ]
 
 
 settings = Settings()  # type: ignore[call-arg]

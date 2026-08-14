@@ -26,7 +26,6 @@ from twaky.sentinels.mail.llm.hardening import Hardening
 from twaky.sentinels.mail.llm.invoke import structured_call
 from twaky.sentinels.mail.llm.tiers import UseCase
 from twaky.sentinels.mail.prompts.draft_reply import draft_reply_prompt
-from twaky.sentinels.mail.prompts.memories import select_memories_prompt
 from twaky.sentinels.mail.prompts.rules import choose_rule_prompt, learn_pattern_prompt
 from twaky.sentinels.mail.prompts.spam_check import spam_check_prompt
 from twaky.sentinels.mail.prompts.thread_status import thread_status_prompt
@@ -34,7 +33,6 @@ from twaky.sentinels.mail.schemas import (
     ChooseRuleOutput,
     DraftReplyOutput,
     LearnPatternOutput,
-    SelectMemoriesOutput,
     SpamCheckOutput,
     ThreadStatusOutput,
 )
@@ -263,11 +261,29 @@ def make_match_rules(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
                     }
 
         # ------------------------------------------------------------------
-        # Stage 1 — Learned pattern
+        # Stage 1 — Learned pattern (3-branch short-circuit)
         # ------------------------------------------------------------------
         pattern = lp_store.by_sender(sender)
         if pattern is not None:
             log.debug("match_rules: learned_pattern → %r", pattern.rule_name)
+            if pattern.rule_name.startswith("label:"):
+                return {
+                    "matched_by": "learned_pattern",
+                    "rule_name": pattern.rule_name,
+                }
+            if pattern.rule_name == "trust_sender":
+                return {
+                    "matched_by": "learned_pattern",
+                    "rule_name": "trust_sender",
+                    "skip_spam_triage": True,
+                }
+            if pattern.rule_name == "block_sender":
+                return {
+                    "matched_by": "learned_pattern",
+                    "rule_name": "block_sender",
+                    "bucket": "spam",
+                }
+            # Fallback for any other learned pattern
             return {
                 "matched_by": "learned_pattern",
                 "rule_name": pattern.rule_name,
@@ -632,52 +648,35 @@ def make_select_memories(
 
         # Stage 0: Empty thread → return early
         if not thread:
-            return {"memory_ids": []}
-
-        latest = thread[-1]
+            return {"memories": []}
 
         # Stage 1: Extract sender
         try:
-            sender = _sender_email(latest)
+            sender = _sender_email(thread[-1])
         except (KeyError, IndexError, TypeError):
-            return {"memory_ids": []}
+            return {"memories": []}
+
+        domain = sender.split("@", 1)[-1] if "@" in sender else ""
 
         # Stage 2: Read config
-        pool_size = ctx.base.sentinel_row.config_values.get(
-            "memory_candidate_pool", 100
-        )
         max_inject = ctx.base.sentinel_row.config_values.get("memory_inject_max", 16)
 
-        # Stage 3: Query candidate pool
-        pool = mem_store.candidate_pool(sender, limit=pool_size)
-
-        # Stage 4: Empty pool → return early
-        if not pool:
-            return {"memory_ids": []}
-
-        # Stage 5: Build pool dicts for LLM
-        pool_dicts = [
-            {
-                "id": str(m.id),
-                "kind": m.kind,
-                "scope": m.scope,
-                "scope_value": m.scope_value,
-                "content": m.content,
-            }
-            for m in pool
-        ]
-
-        # Stage 6: Call LLM
-        prompt = select_memories_prompt(dict(state), pool_dicts)
-        output: SelectMemoriesOutput = structured_call(
-            prompt,
-            SelectMemoriesOutput,
-            hardening=Hardening.COMPACT,
-            use_case=UseCase.SELECT_MEMORIES,
+        # Stage 3: Ranked query replaces LLM selection
+        memories = mem_store.list_for_prompt(
+            sender_email=sender,
+            sender_domain=domain,
+            limit=max_inject,
         )
 
-        # Stage 7: Return bounded memory ids
-        return {"memory_ids": output.memory_ids[:max_inject]}
+        # Stage 4: Touch returned IDs to extend their TTL
+        mem_store.touch([m.id for m in memories])
+
+        log.debug("select_memories: %d memories selected for sender %r", len(memories), sender)
+        return {
+            "memories": [
+                {"id": str(m.id), "content": m.content} for m in memories
+            ]
+        }
 
     return _node
 
@@ -891,20 +890,24 @@ def make_draft_reply(ctx: NodeContext) -> Callable[[MailAgentState], MailAgentSt
 
         latest = thread[-1]
 
-        # Fetch memories if memory_ids provided
-        memory_ids = state.get("memory_ids") or []
-        memories = mem_store.get_many(memory_ids) if memory_ids else []
-
-        # Build memory dicts for LLM
-        memories_dicts = [
-            {
-                "kind": m.kind,
-                "scope": m.scope,
-                "scope_value": m.scope_value,
-                "content": m.content,
-            }
-            for m in memories
-        ]
+        # Fetch memories: prefer the pre-ranked "memories" field from
+        # select_memories (SP5b); fall back to fetching by memory_ids for
+        # backward compatibility with older pipeline configurations.
+        raw_memories: list[dict[str, Any]] | None = state.get("memories")
+        if raw_memories is not None:
+            memories_dicts = [{"id": m.get("id", ""), "content": m.get("content", "")} for m in raw_memories]
+        else:
+            memory_ids = state.get("memory_ids") or []
+            fetched = mem_store.get_many(memory_ids) if memory_ids else []
+            memories_dicts = [
+                {
+                    "kind": m.kind,
+                    "scope": m.scope,
+                    "scope_value": m.scope_value,
+                    "content": m.content,
+                }
+                for m in fetched
+            ]
 
         # Call LLM to generate draft
         prompt = draft_reply_prompt(

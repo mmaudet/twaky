@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from starlette.responses import Response
 
 from twaky.api.deps import require_owner
@@ -26,6 +26,8 @@ from twaky.api.schemas.mail_sentinel import (
     MailRuleProposeResponse,
     MailRuleSummary,
     MatchedExample,
+    MemoryPersistRequest,
+    ObservationSummary,
 )
 from twaky.sentinels.mail.nodes import rule_matches_static
 from twaky.sentinels.mail.store import learned_patterns as lp_store
@@ -82,6 +84,9 @@ def _memory_to_summary(mem) -> MailMemorySummary:
         content=mem.content,
         created_at=mem.created_at,
         expires_at=mem.expires_at,
+        source=mem.source,
+        confidence=mem.confidence,
+        mission_id=mem.mission_id,
     )
 
 
@@ -477,6 +482,72 @@ def propose_rule(
         simulation_partial=simulation_partial,
         simulation_partial_reason=simulation_partial_reason,
     )
+
+
+# ---------------------------------------------------------------------------
+# 10. PATCH /mail-sentinel/memories/{id}  (SP5b)
+# ---------------------------------------------------------------------------
+
+
+@router.patch("/memories/{memory_id}", response_model=MailMemorySummary)
+def patch_memory(
+    memory_id: UUID,
+    body: MemoryPersistRequest,
+    _email: str = Depends(require_owner),
+):
+    """Toggle a memory between permanent (persist=True) and 7-day TTL (persist=False)."""
+    updated = mem_store.set_persist(memory_id, body.persist)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="memory_not_found")
+    return _memory_to_summary(updated)
+
+
+# ---------------------------------------------------------------------------
+# 11. DELETE /mail-sentinel/memories/{id}  (SP5b gap-fill)
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/memories/{memory_id}",
+    status_code=204,
+    responses={404: {"description": "memory_not_found"}},
+)
+def delete_memory(memory_id: UUID, _email: str = Depends(require_owner)):
+    """Hard-delete a memory. Returns 404 if not found."""
+    deleted = mem_store.delete(memory_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="memory_not_found")
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# 12. GET /mail-sentinel/observations  (SP5b)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/observations", response_model=list[ObservationSummary])
+def list_observations(
+    limit: int = 100,
+    _email: str = Depends(require_owner),
+) -> list[ObservationSummary]:
+    """Return recently recorded observations ordered by observed_at DESC."""
+    from twaky.sentinels.mail.store import observations as obs_store
+
+    rows = obs_store.list_recent(limit=limit)
+    return [
+        ObservationSummary(
+            id=r.id,
+            email_id=r.email_id,
+            mailbox_id=r.mailbox_id,
+            observation_type=r.observation_type.value,
+            observed_at=r.observed_at,
+            extraction_outcome=r.extraction_outcome.value,
+            memory_ids=r.memory_ids,
+            pattern_ids=r.pattern_ids,
+            error_repr=r.error_repr,
+        )
+        for r in rows
+    ]
 
 
 __all__ = ["router"]

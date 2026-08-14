@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -30,11 +31,14 @@ import {
     AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { useMailRules, useDeleteMailRule, type MailRuleSummary } from '@/hooks/use-mail-sentinel-rules'
-import { useMailMemories, type MailMemorySummary } from '@/hooks/use-mail-sentinel-memories'
+import { useMailMemories, usePatchMailMemory, useForgetMailMemory, type MailMemorySummary } from '@/hooks/use-mail-sentinel-memories'
 import { useMailPatterns, useForgetMailPattern, type LearnedPatternSummary } from '@/hooks/use-mail-sentinel-patterns'
+import { useMailObservations } from '@/hooks/use-mail-sentinel-observations'
 import { useSentinelRuns } from '@/hooks/use-sentinels'
 import { AuthTab } from './auth-tab'
 import { RecentSpamTab } from './recent-spam-tab'
+import { MemoryCard } from './components/MemoryCard'
+import { ObservationsList } from './components/ObservationsList'
 import type { components } from '@/lib/api-types'
 
 type SentinelRunSummary = components['schemas']['SentinelRunSummary']
@@ -171,9 +175,44 @@ function RulesTab() {
 
 function MemoriesTab() {
     const { data: memories, isLoading, error } = useMailMemories()
+    const patchMemory = usePatchMailMemory()
+    const forgetMemory = useForgetMailMemory()
+
+    const [filterSource, setFilterSource] = useState<string>('')
+    const [filterScope, setFilterScope] = useState<string>('')
+    const [filterKind, setFilterKind] = useState<string>('')
 
     if (isLoading) return <div className="p-4 text-muted-foreground">Loading memories…</div>
     if (error) return <p className="p-4 text-red-600">Error: {error.message}</p>
+
+    const filtered = (memories ?? []).filter((m: MailMemorySummary) => {
+        if (filterSource && m.source !== filterSource) return false
+        if (filterScope && m.scope !== filterScope) return false
+        if (filterKind && m.kind !== filterKind) return false
+        return true
+    })
+
+    const sources = Array.from(new Set((memories ?? []).map((m: MailMemorySummary) => m.source)))
+    const scopes = Array.from(new Set((memories ?? []).map((m: MailMemorySummary) => m.scope)))
+    const kinds = Array.from(new Set((memories ?? []).map((m: MailMemorySummary) => m.kind)))
+
+    async function handleForget(id: string) {
+        try {
+            await forgetMemory.mutateAsync(id)
+            toast.success('Memory reset to 7-day TTL')
+        } catch {
+            toast.error('Failed to forget memory')
+        }
+    }
+
+    async function handlePersist(id: string, persist: boolean) {
+        try {
+            await patchMemory.mutateAsync({ memory_id: id, persist })
+            toast.success(persist ? 'Memory made permanent' : 'Memory reset to 7-day TTL')
+        } catch {
+            toast.error('Failed to update memory')
+        }
+    }
 
     if (!memories || memories.length === 0) {
         return (
@@ -184,41 +223,62 @@ function MemoriesTab() {
     }
 
     return (
-        <Table>
-            <TableHeader>
-                <TableRow>
-                    <TableHead>Kind</TableHead>
-                    <TableHead>Scope</TableHead>
-                    <TableHead>Content</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Expires</TableHead>
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {memories.map((m: MailMemorySummary) => (
-                    <TableRow key={m.id}>
-                        <TableCell>
-                            <Badge variant="secondary">{m.kind}</Badge>
-                        </TableCell>
-                        <TableCell>
-                            <span className="text-sm text-muted-foreground">{m.scope}</span>
-                            {m.scope_value && (
-                                <code className="ml-1 text-xs">{m.scope_value}</code>
-                            )}
-                        </TableCell>
-                        <TableCell className="max-w-xs truncate text-sm">
-                            {m.content.slice(0, 120)}{m.content.length > 120 ? '…' : ''}
-                        </TableCell>
-                        <TableCell className="text-sm tabular-nums">
-                            {new Date(m.created_at).toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-sm tabular-nums">
-                            {new Date(m.expires_at).toLocaleString()}
-                        </TableCell>
-                    </TableRow>
-                ))}
-            </TableBody>
-        </Table>
+        <div className="space-y-4">
+            <div className="flex gap-3 flex-wrap items-center">
+                <label className="text-sm text-muted-foreground flex items-center gap-1">
+                    Source:
+                    <select
+                        className="ml-1 border rounded px-2 py-1 text-sm bg-background"
+                        value={filterSource}
+                        onChange={(e) => setFilterSource(e.target.value)}
+                    >
+                        <option value="">All</option>
+                        {sources.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                </label>
+                <label className="text-sm text-muted-foreground flex items-center gap-1">
+                    Scope:
+                    <select
+                        className="ml-1 border rounded px-2 py-1 text-sm bg-background"
+                        value={filterScope}
+                        onChange={(e) => setFilterScope(e.target.value)}
+                    >
+                        <option value="">All</option>
+                        {scopes.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                </label>
+                <label className="text-sm text-muted-foreground flex items-center gap-1">
+                    Kind:
+                    <select
+                        className="ml-1 border rounded px-2 py-1 text-sm bg-background"
+                        value={filterKind}
+                        onChange={(e) => setFilterKind(e.target.value)}
+                    >
+                        <option value="">All</option>
+                        {kinds.map((k) => <option key={k} value={k}>{k}</option>)}
+                    </select>
+                </label>
+                <span className="text-xs text-muted-foreground ml-auto">
+                    {filtered.length} / {memories.length}
+                </span>
+            </div>
+            {filtered.length === 0 ? (
+                <div className="rounded-lg border p-8 text-center">
+                    <p className="text-muted-foreground">No memories match the current filters.</p>
+                </div>
+            ) : (
+                <div>
+                    {filtered.map((m: MailMemorySummary) => (
+                        <MemoryCard
+                            key={m.id}
+                            memory={m}
+                            onForget={handleForget}
+                            onPersist={handlePersist}
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
     )
 }
 
@@ -256,7 +316,17 @@ function PatternsTab() {
                 {patterns.map((p: LearnedPatternSummary) => (
                     <TableRow key={p.id}>
                         <TableCell className="font-mono text-sm">{p.sender_email}</TableCell>
-                        <TableCell className="text-sm">{p.rule_name}</TableCell>
+                        <TableCell className="text-sm">
+                            <span className="text-xs text-neutral-500">
+                                {p.rule_name.startsWith('label:') && '🏷️'}
+                                {p.rule_name === 'trust_sender' && '✅'}
+                                {p.rule_name === 'block_sender' && '🚫'}
+                                {' '}{p.rule_name}
+                            </span>
+                            {p.rule_name.startsWith('label:') && (
+                                <span className="text-xs text-neutral-500 ml-2">Saves ~1 LLM call/msg</span>
+                            )}
+                        </TableCell>
                         <TableCell className="tabular-nums">
                             <span
                                 className={
@@ -330,9 +400,9 @@ function PatternsTab() {
     )
 }
 
-// ── Runs tab ──────────────────────────────────────────────────────────────────
+// ── Runs sub-components ───────────────────────────────────────────────────────
 
-function RunsTab() {
+function RunsList() {
     const { data: runs, isLoading, error } = useSentinelRuns('mail', { limit: 50 })
 
     if (isLoading) return <div className="p-4 text-muted-foreground">Loading runs…</div>
@@ -395,6 +465,34 @@ function RunsTab() {
                 ))}
             </TableBody>
         </Table>
+    )
+}
+
+function ObservationsSubTab() {
+    const { data: observations, isLoading, error } = useMailObservations({ limit: 100 })
+
+    if (isLoading) return <div className="p-4 text-muted-foreground">Loading observations…</div>
+    if (error) return <p className="p-4 text-red-600">Error: {error.message}</p>
+
+    return <ObservationsList rows={observations ?? []} />
+}
+
+// ── Runs tab ──────────────────────────────────────────────────────────────────
+
+function RunsTab() {
+    return (
+        <Tabs defaultValue="runs-list">
+            <TabsList>
+                <TabsTrigger value="runs-list">Runs</TabsTrigger>
+                <TabsTrigger value="observations">Observations</TabsTrigger>
+            </TabsList>
+            <TabsContent value="runs-list" className="mt-4">
+                <RunsList />
+            </TabsContent>
+            <TabsContent value="observations" className="mt-4">
+                <ObservationsSubTab />
+            </TabsContent>
+        </Tabs>
     )
 }
 
