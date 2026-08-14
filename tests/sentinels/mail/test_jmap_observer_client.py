@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
 import pytest
 
 from twaky.sentinels.mail.jmap_observer_client import JmapObserverClient
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -133,7 +131,7 @@ async def test_changes_returns_created_updated() -> None:
             },
         )
     )
-    out = await _make(t).changes("mbx-1", "state-Y")
+    out = await _make(t).changes("state-Y")
     assert out["newState"] == "state-Z"
     assert out["created"] == ["e1", "e2"]
     assert out["updated"] == []
@@ -150,7 +148,7 @@ async def test_changes_no_methodresponse_returns_defaults() -> None:
             headers={"content-type": "application/json"},
         )
     )
-    out = await _make(t).changes("mbx-1", "state-Y")
+    out = await _make(t).changes("state-Y")
     assert out["newState"] == "state-Y"
     assert out["created"] == []
 
@@ -163,7 +161,7 @@ async def test_changes_sends_since_state() -> None:
             {"newState": "s2", "created": [], "updated": [], "destroyed": []},
         )
     )
-    await _make(t).changes("mbx-1", "state-ANCHOR")
+    await _make(t).changes("state-ANCHOR")
     body = json.loads(t.last_request.content)  # type: ignore[union-attr]
     args = body["methodCalls"][0][1]
     assert args["sinceState"] == "state-ANCHOR"

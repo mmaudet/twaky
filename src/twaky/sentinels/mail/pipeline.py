@@ -43,8 +43,30 @@ from twaky.sentinels.mail.state import MailAgentState, ThreadStatus
 from twaky.sentinels.mail.store import rules as rules_store
 
 
-def _route_after_match(state: MailAgentState) -> str:
-    return "learn_pattern" if state.get("matched_by") == "ai" else "apply_actions"
+def _route_after_match_rules(state: MailAgentState) -> str:
+    """SP5c: route after match_rules based on how the rule was chosen.
+
+    - ``learned_pattern`` → straight to ``apply_actions`` (skip spam_triage).
+      The pattern is trusted (evidence >= 3, confidence >= 0.9), and this
+      is the whole point of the short-circuit: no LLM, no spam check on
+      senders we already trust or explicitly want to block.
+    - ``ai`` → ``learn_pattern`` first, then ``spam_triage``, then ``apply_actions``.
+    - Everything else (static, none, thread_continuity) → ``spam_triage``,
+      then ``apply_actions`` if not spam.
+    """
+    matched_by = state.get("matched_by")
+    if matched_by == "learned_pattern":
+        return "apply_actions"
+    if matched_by == "ai":
+        return "learn_pattern"
+    return "spam_triage"
+
+
+def _route_after_spam_triage_new(state: MailAgentState) -> str:
+    """SP5c: after spam_triage, route to apply_actions unless spam bucket set."""
+    if state.get("spam_bucket") in {"spam", "phishing-alert"}:
+        return END
+    return "apply_actions"
 
 
 def build_graph(ctx: NodeContext):
@@ -62,6 +84,9 @@ def build_graph(ctx: NodeContext):
         A compiled LangGraph app ready for ``.invoke()``.
     """
 
+    # NOTE: legacy inner router kept for reference — SP5c uses
+    # ``_route_after_spam_triage_new`` at module scope. See ``build_graph``
+    # edges below.
     def _route_after_spam_triage(state: MailAgentState) -> str:
         if state.get("spam_bucket") in {"spam", "phishing-alert"}:
             return END
@@ -106,19 +131,27 @@ def build_graph(ctx: NodeContext):
     _add("select_memories", make_select_memories, timeout_s=_LLM_TIMEOUT)
     _add("draft_reply", make_draft_reply, timeout_s=_LLM_TIMEOUT)
 
+    # SP5c pipeline order: match_rules first. Learned patterns short-circuit
+    # spam_triage entirely (trusted senders / block_sender / label:X). AI
+    # matches go through learn_pattern → spam_triage → apply_actions. Static
+    # / no-match go straight through spam_triage → apply_actions.
     graph.add_edge(START, "load_thread")
-    graph.add_edge("load_thread", "spam_triage")
-    graph.add_conditional_edges(
-        "spam_triage",
-        _route_after_spam_triage,
-        {"match_rules": "match_rules", END: END},
-    )
+    graph.add_edge("load_thread", "match_rules")
     graph.add_conditional_edges(
         "match_rules",
-        _route_after_match,
-        {"learn_pattern": "learn_pattern", "apply_actions": "apply_actions"},
+        _route_after_match_rules,
+        {
+            "apply_actions": "apply_actions",
+            "learn_pattern": "learn_pattern",
+            "spam_triage": "spam_triage",
+        },
     )
-    graph.add_edge("learn_pattern", "apply_actions")
+    graph.add_edge("learn_pattern", "spam_triage")
+    graph.add_conditional_edges(
+        "spam_triage",
+        _route_after_spam_triage_new,
+        {"apply_actions": "apply_actions", END: END},
+    )
     graph.add_edge("apply_actions", "thread_status")
     graph.add_conditional_edges(
         "thread_status",

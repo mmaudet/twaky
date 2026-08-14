@@ -502,16 +502,46 @@ def make_apply_actions(ctx: NodeContext) -> Callable[[MailAgentState], MailAgent
         if not rule_name or not thread:
             return {"actions_applied": []}
 
-        # Fetch rule from store
+        latest = thread[-1]
+        email_id: str = latest.get("id", "")
+
+        # SP5c: synthetic actions for learned patterns. Learned patterns
+        # never have a corresponding row in ``mail_sentinel_rule`` — their
+        # ``rule_name`` is one of ``label:<Folder>``, ``trust_sender``,
+        # or ``block_sender``. We handle them here so ``apply_actions``
+        # actually does something for learned-pattern short-circuits.
+        matched_by = state.get("matched_by")
+        if matched_by == "learned_pattern":
+            actions_applied: list[str] = []
+            if rule_name.startswith("label:"):
+                _, label_name = rule_name.split(":", 1)
+                ctx.mail.label(email_id, label_name)
+                actions_applied.append(rule_name)
+            elif rule_name == "trust_sender":
+                # No side-effect: letting the mail through IS the action.
+                # Recorded for auditability in sentinel_run.trace.
+                actions_applied.append("trust_sender")
+            elif rule_name == "block_sender":
+                # Set the JMAP $junk keyword so the client / server-side
+                # spam rules treat it as spam. James / Twake Mail handles
+                # actual mailbox move via sieve or user config.
+                ctx.mail.set_keyword(email_id, "$junk", True)
+                actions_applied.append("block_sender")
+            else:
+                log.warning(
+                    "apply_actions: unknown learned_pattern rule_name %r",
+                    rule_name,
+                )
+            return {"actions_applied": actions_applied}
+
+        # Fetch rule from store (static / AI-matched paths)
         rule = rules_store.by_name(rule_name)
         if rule is None or not rule.enabled:
             return {"actions_applied": []}
 
-        latest = thread[-1]
-        email_id: str = latest.get("id", "")
         subject: str = latest.get("subject", "(no subject)")
 
-        actions_applied: list[str] = []
+        actions_applied = []
 
         for action in rule.actions:
             if action == "archive":
