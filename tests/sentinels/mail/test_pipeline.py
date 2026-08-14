@@ -180,7 +180,13 @@ class TestEndToEndAiMatchedDraftReply:
             if schema is SelectMemoriesOutput:
                 return SelectMemoriesOutput(memory_ids=[])
             if schema is DraftReplyOutput:
-                return DraftReplyOutput(body="Bonjour Alice, oui.", language="fr")
+                return DraftReplyOutput(
+                    body=(
+                        "Bonjour Alice,\n\nOui, ça marche pour Q3. "
+                        "On peut se caler jeudi ?\n\nBien à vous,\n\nMichel-Marie"
+                    ),
+                    language="fr",
+                )
             raise AssertionError(f"Unexpected structured_call for schema {schema}")
 
         with patch(
@@ -255,8 +261,12 @@ class TestPipelineSpamBucketEndsEarly:
         assert "__spam__" in adapter._labels["e1"]
         # Assert draft was not created
         assert state.get("draft") is None
-        # Assert no rules were evaluated
-        assert state.get("matched_by") is None
+        # SP5c: match_rules now runs BEFORE spam_triage. With no rules
+        # configured it returns matched_by="none" (not None). Spam bucket
+        # then short-circuits the pipeline to END before apply_actions,
+        # so no rule_name is chosen and no draft is produced.
+        assert state.get("matched_by") in (None, "none")
+        assert state.get("rule_name") is None
 
 
 # ---------------------------------------------------------------------------

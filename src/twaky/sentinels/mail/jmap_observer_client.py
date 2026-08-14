@@ -135,14 +135,53 @@ class JmapObserverClient:
                 return str(response.get("state", ""))
         return ""
 
-    async def changes(self, mailbox_id: str, since_state: str) -> dict[str, Any]:
+    async def get_global_state(self) -> str:
+        """Return the current global Email/state (used for bootstrap).
+
+        SP5c: replaces the per-mailbox ``get_mailbox_state`` for the
+        observer's tick logic. Runs ``Email/query`` with limit=0 which
+        returns the current query state string (semantically equivalent
+        to the ``state`` needed for Email/changes sinceState).
+
+        Falls back to an empty string on unexpected response shape.
+        """
+        payload = {
+            "using": _JMAP_USING,
+            "methodCalls": [
+                [
+                    "Email/query",
+                    {"accountId": self.account_id, "limit": 0},
+                    "0",
+                ]
+            ],
+        }
+        async with self._make_client() as client:
+            resp = await client.post(
+                self.api_url, json=payload, headers=self._headers()
+            )
+            resp.raise_for_status()
+        data = resp.json()
+        for method, response, _ in data.get("methodResponses", []):
+            if method == "Email/query":
+                # Prefer queryState; fall back to state.
+                return str(response.get("queryState") or response.get("state") or "")
+        return ""
+
+    async def changes(
+        self, since_state: str, mailbox_id: str | None = None
+    ) -> dict[str, Any]:
         """Run Email/changes since *since_state*.
 
+        SP5c: ``mailbox_id`` is optional and IGNORED for the global path.
+        Kept as a keyword parameter for backward compatibility with the
+        SP5b signature ``changes(mailbox_id, since_state)`` — old callers
+        that pass positionally must be updated (see observer.py).
+
         Returns a dict with keys: newState, created, updated, destroyed.
-        ``mailbox_id`` is accepted for API symmetry with the observer protocol
-        but Email/changes does not support per-mailbox filtering natively —
-        callers inspect the returned ids' mailboxIds to scope if needed.
+        The response is a global mail-collection delta; the observer
+        filters/dispatches based on each returned email's ``mailboxIds``.
         """
+        _ = mailbox_id  # explicitly unused
         payload = {
             "using": _JMAP_USING,
             "methodCalls": [

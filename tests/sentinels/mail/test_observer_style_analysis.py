@@ -22,11 +22,16 @@ class FakeAdapter:
     async def query_mailboxes(self):
         return [{"id": "mbx-sent", "role": "sent", "name": "Sent"}]
 
-    async def get_mailbox_state(self, mailbox_id):
-        return "state-1"
+    async def get_global_state(self):
+        return "state-0"
 
-    async def changes(self, mailbox_id, since_state):
-        return {"newState": "state-1", "created": [], "updated": [], "destroyed": []}
+    async def changes(self, since_state, mailbox_id=None):
+        return {
+            "newState": "state-1",
+            "created": [],
+            "updated": [],
+            "destroyed": [],
+        }
 
     async def get_email(self, email_id):
         return None
@@ -48,10 +53,17 @@ def _cleanup_all():
 @pytest.fixture(autouse=True)
 def _cleanup(monkeypatch):
     from twaky.config import settings
+    from twaky.sentinels.mail.observer import _GLOBAL_STATE_KEY
+
     monkeypatch.setattr(settings, "mail_sentinel_observer_enabled", True)
     _cleanup_all()
-    # Seed mailbox_state so the tick doesn't bootstrap-and-return
-    ms.upsert(mailbox_id="mbx-sent", jmap_state="state-0", role="sent", name="Sent")
+    # SP5c: seed the GLOBAL state row so the tick doesn't bootstrap-and-return
+    ms.upsert(
+        mailbox_id=_GLOBAL_STATE_KEY,
+        jmap_state="state-0",
+        role=None,
+        name=_GLOBAL_STATE_KEY,
+    )
     yield
     _cleanup_all()
 
