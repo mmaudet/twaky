@@ -282,6 +282,78 @@ class JmapObserverClient:
                     return int(lst[0].get("totalEmails", 0))
         return 0
 
+    async def list_recent_emails_from(
+        self,
+        *,
+        sender_email: str,
+        since_days: int = 30,
+        limit: int = 1,
+    ) -> list[dict[str, Any]]:
+        """SP5c 5.1: fetch the most recent mails from a specific sender.
+
+        Uses ``Email/query`` with a filter on ``from`` (substring match
+        per JMAP) + ``receivedAt after`` window, then ``Email/get`` via
+        result-references for subject + preview. Used by the pattern
+        health check to grab one recent mail per learned pattern to
+        LLM-verify still relevance.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        since_ts = (
+            (datetime.now(tz=UTC) - timedelta(days=since_days))
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        payload = {
+            "using": _JMAP_USING,
+            "methodCalls": [
+                [
+                    "Email/query",
+                    {
+                        "accountId": self.account_id,
+                        "filter": {
+                            "from": sender_email,
+                            "after": since_ts,
+                        },
+                        "sort": [
+                            {"property": "receivedAt", "isAscending": False}
+                        ],
+                        "limit": limit,
+                    },
+                    "q",
+                ],
+                [
+                    "Email/get",
+                    {
+                        "accountId": self.account_id,
+                        "#ids": {
+                            "resultOf": "q",
+                            "name": "Email/query",
+                            "path": "/ids",
+                        },
+                        "properties": [
+                            "id",
+                            "from",
+                            "subject",
+                            "preview",
+                            "receivedAt",
+                        ],
+                    },
+                    "g",
+                ],
+            ],
+        }
+        async with self._make_client() as client:
+            resp = await client.post(
+                self.api_url, json=payload, headers=self._headers()
+            )
+            resp.raise_for_status()
+        data = resp.json()
+        for method, response, _ in data.get("methodResponses", []):
+            if method == "Email/get":
+                return list(response.get("list", []))
+        return []
+
     async def list_recent_emails(
         self, mailbox_id: str, limit: int = 100
     ) -> list[dict[str, Any]]:

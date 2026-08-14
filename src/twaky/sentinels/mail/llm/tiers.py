@@ -27,6 +27,8 @@ class UseCase(str, Enum):
     EXTRACT_MEMORY_MOVE = "extract_memory_move"
     # SP7 / Task 141: writing-style analysis
     ANALYZE_STYLE = "analyze_style"
+    # SP5c 5.1: periodic learned-pattern health check
+    CONFIRM_PATTERN = "confirm_pattern"
 
 
 _MAPPING: dict[UseCase, Tier] = {
@@ -40,6 +42,7 @@ _MAPPING: dict[UseCase, Tier] = {
     UseCase.EXTRACT_MEMORY_DIFF: Tier.CHAT,
     UseCase.EXTRACT_MEMORY_MOVE: Tier.ECONOMY,
     UseCase.ANALYZE_STYLE: Tier.CHAT,
+    UseCase.CONFIRM_PATTERN: Tier.ECONOMY,
 }
 
 
