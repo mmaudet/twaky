@@ -133,7 +133,7 @@ def test_sentinel_default_config_schema_returns_empty_dict():
 
 
 def test_context_has_expected_fields():
-    """Context must expose the five fields required by the spec."""
+    """Context exposes the five spec fields plus SP5c 5.2's mutable trace."""
     fields = {f.name for f in dataclasses.fields(Context)}
     assert fields == {
         "db_pool",
@@ -141,6 +141,7 @@ def test_context_has_expected_fields():
         "delegation",
         "sentinel_row",
         "logger",
+        "trace",  # SP5c 5.2: decision trace accumulator
     }
 
 
