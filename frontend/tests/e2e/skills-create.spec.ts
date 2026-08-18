@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures'
+import { test, expect, setMonacoValue } from './fixtures'
 
 test('create skill via UI, verify it appears in list, cleanup via delete', async ({ signedInPage: page }) => {
     // Navigate to /skills
@@ -15,12 +15,9 @@ test('create skill via UI, verify it appears in list, cleanup via delete', async
     // Fill Description — identified by htmlFor="desc" → label text "Description"
     await page.getByLabel(/^description$/i).fill('E2E echo skill')
 
-    // Monaco is a canvas — edit via keyboard after focusing the editor
-    const editor = page.locator('.monaco-editor').first()
-    await editor.click()
-    await page.keyboard.press('Control+A')  // Linux select-all
-    await page.keyboard.press('Delete')
-    await page.keyboard.type('def run(**kwargs):\n    return "hello"')
+    // Paste rather than type: Monaco auto-closes the quotes in `return "hello"`
+    // and auto-indents the continuation line, so typed source arrives mangled.
+    await setMonacoValue(page, 'def run(**kwargs):\n    return "hello"')
 
     // Bind Atlas via the labeled checkbox (id="bind-atlas")
     await page.getByLabel('atlas', { exact: true }).click()

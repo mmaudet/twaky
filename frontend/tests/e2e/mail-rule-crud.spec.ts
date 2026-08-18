@@ -1,4 +1,19 @@
-import { test, expect } from './fixtures'
+import { test, expect, setMonacoValue } from './fixtures'
+import type { Page } from '@playwright/test'
+
+/**
+ * Commit the rule currently in the editor.
+ *
+ * The editor gained a mandatory review step: "Preview matches" runs the
+ * proposal, a checkbox acknowledges it, and only then does "Apply rule"
+ * appear and enable. The single "Save rule" button this spec used to click
+ * no longer exists.
+ */
+async function applyRule(page: Page): Promise<void> {
+    await page.getByRole('button', { name: 'Preview matches' }).click()
+    await page.getByLabel('I have reviewed the matches').check()
+    await page.getByRole('button', { name: 'Apply rule' }).click()
+}
 
 // Unique suffix to avoid collisions between parallel test runs
 const SUFFIX = Date.now()
@@ -12,7 +27,7 @@ const newRuleJson = JSON.stringify(
         conditions: [{ field: 'from', operator: 'contains', value: '@e2e-test.invalid' }],
         combinator: 'OR',
         actions: ['archive'],
-        priority: 999,
+        priority: 99,
         enabled: true,
         run_on_threads: false,
     },
@@ -27,7 +42,7 @@ const editedRuleJson = JSON.stringify(
         conditions: [{ field: 'subject', operator: 'contains', value: '[E2E]' }],
         combinator: 'OR',
         actions: ['archive'],
-        priority: 998,
+        priority: 98,
         enabled: true,
         run_on_threads: false,
     },
@@ -49,14 +64,10 @@ test('mail-rule-crud: create, verify in list, edit, delete', async ({ signedInPa
     await expect(page.getByRole('heading', { name: 'New rule' })).toBeVisible()
 
     // Replace the entire Monaco editor content with our test rule JSON.
-    const editor = page.locator('.monaco-editor').first()
-    await editor.click()
-    await page.keyboard.press('Control+A')
-    await page.keyboard.press('Delete')
-    await page.keyboard.type(newRuleJson)
+    await setMonacoValue(page, newRuleJson)
 
-    // Save the new rule — response redirects back to /sentinels/mail
-    await page.getByRole('button', { name: 'Save rule' }).click()
+    // Commit the new rule — response redirects back to /sentinels/mail
+    await applyRule(page)
     await expect(page).toHaveURL(/\/sentinels\/mail$/, { timeout: 10000 })
 
     // ── Step 3: Verify the new rule appears in the list ────────────────────
@@ -69,14 +80,13 @@ test('mail-rule-crud: create, verify in list, edit, delete', async ({ signedInPa
     await expect(page).toHaveURL(/\/sentinels\/mail\/rules\/[0-9a-f-]{36}$/)
 
     // Replace JSON content with the edited version
-    const editorEdit = page.locator('.monaco-editor').first()
-    await editorEdit.click()
-    await page.keyboard.press('Control+A')
-    await page.keyboard.press('Delete')
-    await page.keyboard.type(editedRuleJson)
+    await setMonacoValue(page, editedRuleJson)
 
-    await page.getByRole('button', { name: 'Save rule' }).click()
-    await expect(page).toHaveURL(/\/sentinels\/mail$/, { timeout: 10000 })
+    await applyRule(page)
+    // Editing patches in place and deliberately keeps you on the rule page —
+    // only creation redirects. Confirm the save, then go back to the list.
+    await expect(page.getByText('Rule saved')).toBeVisible({ timeout: 10000 })
+    await page.goto('/sentinels/mail')
 
     // Verify the edited name appears and the old name is gone
     await expect(page.getByText(RULE_NAME_EDITED)).toBeVisible()
