@@ -1,6 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────
 # CI override for docker-compose.yml
-# Publishes twaky-frontend on localhost:3000 for GitHub Actions e2e tests.
+# Publishes twaky-frontend on :3000 (e2e job) and twaky-pg on :5432 (test job)
+# so GitHub Actions steps can reach them from the runner host.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.ci.yml up
 # ─────────────────────────────────────────────────────────────────────
 
@@ -8,3 +9,11 @@ services:
   twaky-frontend:
     ports:
       - "3000:3000"
+
+  # Published so the `test` job can reach the DB from the runner host. Also
+  # the signal that initdb finished: during provisioning Postgres listens on
+  # the unix socket only, so a successful TCP connect means the sql/*.sh
+  # scripts have all run.
+  twaky-pg:
+    ports:
+      - "5432:5432"

@@ -85,8 +85,43 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      # ~320 tests (27% of the suite) self-skip with "twaky-pg not reachable"
+      # when there is no database: every repository, projector and AGE test.
+      # Boot the real thing through docker compose rather than a bare
+      # `services:` container, so the sql/*.sh provisioning path is exercised
+      # by CI too.
+      - name: Provision Postgres+AGE
+        run: |
+          docker network create twake-network
+          bash scripts/ci-env.sh
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d twaky-pg
+          # Postgres serves initdb over the unix socket only, so a successful
+          # TCP connect is the signal that every sql/*.sh has finished.
+          for _ in $(seq 1 60); do
+            if docker exec twaky-pg pg_isready -h 127.0.0.1 -U twaky -d twaky >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          docker exec twaky-pg pg_isready -h 127.0.0.1 -U twaky -d twaky \
+            || (echo 'twaky-pg never finished provisioning' && docker logs twaky-pg && exit 1)
+
       - name: Pytest
+        env:
+          # Consumed by the ~44 `_reachable()` helpers across the suite, which
+          # prefer TWAKY_TEST_DSN over settings.pg_dsn. Also satisfies the
+          # tests/sentinels/ guard against running on a prod-shaped DSN.
+          TWAKY_TEST_DSN: postgresql://twaky:ci-postgres-not-a-secret@localhost:5432/twaky
+          # Code paths that read settings.pg_dsn directly resolve "twaky-pg"
+          # from inside the docker network — the runner needs localhost.
+          TWAKY_PG_HOST: localhost
+          TWAKY_PG_PASSWORD: ci-postgres-not-a-secret
+          TWAKY_OWNER_EMAIL: owner@ci.local
         run: uv run pytest -q
+
+      - name: Postgres logs on failure
+        if: failure()
+        run: docker logs twaky-pg
 
   frontend:
     runs-on: ubuntu-latest
@@ -137,6 +172,11 @@ jobs:
       - name: Boot the stack
         working-directory: .
         run: |
+          # twake-network is declared `external: true` and every Python
+          # service declares `env_file: [.env]`; without both, `docker compose
+          # up` aborts before starting a single container.
+          docker network create twake-network
+          bash scripts/ci-env.sh
           docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d twaky-pg twaky-api twaky-frontend
           # Wait for twaky-frontend to be healthy (depends on twaky-api)
           for i in {1..30}; do
