@@ -10,6 +10,12 @@ async function stackReachable(baseURL: string): Promise<boolean> {
     }
 }
 
+// The instance owner require_owner() checks against. Hardcoding a real
+// address pins the suite to one deployment: CI provisions its own owner
+// (scripts/ci-env.sh) and every authenticated request came back 403.
+export const OWNER_EMAIL =
+    process.env.TWAKY_OWNER_EMAIL || 'michel.maudet@linagora.com'
+
 function forgeSessionCookie(email: string): string {
     try {
         return execFileSync(
@@ -39,7 +45,7 @@ export const test = base.extend<{ signedInPage: Page }>({
 
     signedInPage: async ({ page, context, baseURL }, use) => {
         // Stack reachability already guaranteed by the `page` fixture above.
-        const cookie = forgeSessionCookie('michel.maudet@linagora.com')
+        const cookie = forgeSessionCookie(OWNER_EMAIL)
         const domain = new URL(baseURL!).hostname
         await context.addCookies([{
             name: 'twaky_session', value: cookie,

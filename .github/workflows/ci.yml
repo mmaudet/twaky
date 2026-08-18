@@ -191,6 +191,10 @@ jobs:
       - name: E2E tests
         env:
           TWAKY_TEST_STACK_URL: http://localhost:3000
+          # Must match the owner scripts/ci-env.sh provisions: the fixture
+          # forges a session cookie for this address and require_owner()
+          # rejects anything else with a 403.
+          TWAKY_OWNER_EMAIL: owner@ci.local
         run: npm run test:e2e
       - name: Upload Playwright report
         if: always()
