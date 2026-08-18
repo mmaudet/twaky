@@ -23,10 +23,14 @@ test('approve draft on awaiting_user mission', async ({ signedInPage: page }) =>
 
     await page.goto(`/missions/${missionId}`)
 
-    // Assert the ApproveDraftForm is present
-    await expect(page.getByRole('heading', { name: 'Approve draft' })).toBeVisible()
-    await expect(page.getByText('bob@x.com')).toBeVisible()
-    await expect(page.getByText('Re: Question about widgets')).toBeVisible()
+    // Assert the ApproveDraftForm is present. Its title is a shadcn CardTitle,
+    // which renders a <div> — there is no heading role to match on.
+    await expect(page.getByText('Approve draft', { exact: true })).toBeVisible()
+    // Match the form's own labels, not the bare values: the page also renders
+    // the raw artifact JSON, which contains the same address and subject and
+    // would make a bare substring match ambiguous.
+    await expect(page.getByText('To: bob@x.com')).toBeVisible()
+    await expect(page.getByText('Subject: Re: Question about widgets')).toBeVisible()
 
     // Approve as-is
     await page.getByRole('button', { name: /Approve/ }).click()

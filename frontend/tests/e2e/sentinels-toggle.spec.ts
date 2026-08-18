@@ -27,8 +27,10 @@ test('sentinel toggle: mail row visible, click switch, PATCH fires, state persis
     expect(typeof body.enabled).toBe('boolean')
     expect(body.enabled).toBe(!wasPreviouslyEnabled)
 
-    // Wait for the response to settle (the toast confirms the update)
-    await expect(page.getByText(/enabled|disabled/i)).toBeVisible({ timeout: 5000 })
+    // Wait for the response to settle (the toast confirms the update).
+    // Match the whole toast sentence: a bare /enabled|disabled/ also hits the
+    // "Enabled" column header, which is two matches and a strict-mode error.
+    await expect(page.getByText(/Sentinel '.*' (enabled|disabled)/i)).toBeVisible({ timeout: 5000 })
 
     // Reload and verify the toggle state was persisted
     await page.goto('/sentinels')
@@ -42,5 +44,5 @@ test('sentinel toggle: mail row visible, click switch, PATCH fires, state persis
     )
     await toggleAfter.click()
     await restorePromise
-    await expect(page.getByText(/enabled|disabled/i)).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText(/Sentinel '.*' (enabled|disabled)/i)).toBeVisible({ timeout: 5000 })
 })

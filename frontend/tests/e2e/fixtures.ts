@@ -62,4 +62,42 @@ export const test = base.extend<{ signedInPage: Page }>({
     },
 })
 
+/**
+ * Replace the content of the page's Monaco editor.
+ *
+ * Do not type source into Monaco with `keyboard.type`: its auto-closing
+ * brackets and quotes fight the input. An opening `{` inserts a `}` ahead of
+ * the cursor, the typed `}` lands after it, and the document ends up
+ * syntactically broken — the rule editor showed "validation errors" and never
+ * enabled Save. Setting the model value through Monaco's own API is
+ * deterministic, and still fires the change event the React wrapper listens to.
+ */
+/**
+ * Replace the content of the page's Monaco editor, via a real clipboard paste.
+ *
+ * Three approaches fail here, each silently producing a wrong submission
+ * rather than an error:
+ *
+ * 1. `keyboard.type` fights Monaco's input aids — an opening `{` inserts a
+ *    matching `}` ahead of the cursor, the typed `}` lands after it, and the
+ *    document ends up syntactically broken.
+ * 2. Disabling those aids with `updateOptions` does not hold: the editor's
+ *    `options` prop is an inline object literal, so every re-render (i.e. every
+ *    keystroke) re-applies it and wipes the overrides.
+ * 3. Setting the model value through Monaco's API avoids typing altogether,
+ *    but @monaco-editor/react does not surface programmatic edits to its
+ *    onChange: the editor displayed the new content while React kept the
+ *    default, and the form submitted the default.
+ *
+ * A paste is verbatim (auto-closing does not apply) and is a real input event,
+ * so React sees it.
+ */
+export async function setMonacoValue(page: Page, value: string): Promise<void> {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.locator('.monaco-editor').first().click()
+    await page.evaluate((v) => navigator.clipboard.writeText(v), value)
+    await page.keyboard.press('ControlOrMeta+A')
+    await page.keyboard.press('ControlOrMeta+V')
+}
+
 export { expect }
