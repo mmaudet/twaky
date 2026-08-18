@@ -27,13 +27,18 @@ from twaky.api.routers import (
     sentinels,
     skills,
 )
-from twaky.api.session import SESSION_COOKIE_NAME
+from twaky.api.session import SESSION_COOKIE_NAME, check_session_secret
 from twaky.api.sse.broker import SSEBroker
 from twaky.config import settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Refuse to serve with an unsigned-in-practice session cookie. Done here
+    # rather than at import time so the module stays importable by tests and
+    # by the OpenAPI exporter, which never start the app.
+    check_session_secret(str(settings.api_session_secret))
+
     broker = SSEBroker()
     await broker.start()
     app.state.broker = broker
