@@ -5,14 +5,13 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from twaky.sentinels.mail import pattern_health as ph
 from twaky.sentinels.mail.pattern_health import PatternConfirmOutput
 from twaky.sentinels.mail.store import learned_patterns as lp
-
 
 pytestmark = pytest.mark.integration
 
@@ -28,9 +27,7 @@ def _cleanup():
         cur.execute("DELETE FROM mail_sentinel_learned_pattern")
 
 
-def _insert_active_pattern(
-    sender: str, rule: str, days_since_confirmed: int
-) -> None:
+def _insert_active_pattern(sender: str, rule: str, days_since_confirmed: int) -> None:
     """Insert an active pattern with a stale ``last_confirmed`` date."""
     from twaky.db import get_pool
 
@@ -39,7 +36,14 @@ def _insert_active_pattern(
             "INSERT INTO mail_sentinel_learned_pattern "
             "(sender_email, rule_name, confidence, evidence_count, first_seen, last_confirmed) "
             "VALUES (%s, %s, %s, %s, now() - make_interval(days => %s), now() - make_interval(days => %s))",
-            (sender.lower(), rule, Decimal("0.95"), 3, days_since_confirmed, days_since_confirmed),
+            (
+                sender.lower(),
+                rule,
+                Decimal("0.95"),
+                3,
+                days_since_confirmed,
+                days_since_confirmed,
+            ),
         )
 
 
@@ -49,6 +53,7 @@ def _fake_adapter(mails_by_sender: dict[str, list[dict]]):
             self, *, sender_email: str, since_days: int = 30, limit: int = 1
         ):
             return mails_by_sender.get(sender_email.lower(), [])[:limit]
+
     return _FA()
 
 
@@ -86,6 +91,7 @@ def test_confirmed_bumps_last_confirmed():
 
     # Verify last_confirmed was bumped
     from twaky.db import get_pool
+
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT last_confirmed FROM mail_sentinel_learned_pattern "
@@ -114,6 +120,7 @@ def test_refuted_decays_confidence():
     assert stats["deleted"] == 0
 
     from twaky.db import get_pool
+
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT confidence FROM mail_sentinel_learned_pattern "

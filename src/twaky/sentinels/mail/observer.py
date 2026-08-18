@@ -163,9 +163,7 @@ class MailObserver:
         email_ids = list(changes.get("created", [])) + list(changes.get("updated", []))
         for email_id in email_ids:
             try:
-                await self._dispatch(
-                    adapter, email_id, mbx_by_id, owner_email, result
-                )
+                await self._dispatch(adapter, email_id, mbx_by_id, owner_email, result)
             except Exception as e:  # noqa: BLE001
                 log.warning("observer: dispatch failed for %s: %r", email_id, e)
                 result.errors.append(f"{email_id}: {e!r}")
@@ -181,9 +179,7 @@ class MailObserver:
         sent_mailbox = self._sent_mailbox(mbx_by_id)
         if sent_mailbox is not None:
             try:
-                await self._maybe_run_style_analysis(
-                    adapter, owner_email, sent_mailbox
-                )
+                await self._maybe_run_style_analysis(adapter, owner_email, sent_mailbox)
             except Exception as e:  # noqa: BLE001
                 log.warning("observer: style analysis failed: %r", e)
                 result.errors.append(f"style_analysis: {e!r}")
@@ -247,9 +243,7 @@ class MailObserver:
 
         # 1. Sent → draft_diff
         if "sent" in role_set:
-            sent_mid = next(
-                mid for mid, r in current_roles.items() if r == "sent"
-            )
+            sent_mid = next(mid for mid, r in current_roles.items() if r == "sent")
             headers = email.get("headers") or []
             in_reply_to = _header(headers, "In-Reply-To") or _header(
                 headers, "References"
@@ -270,9 +264,7 @@ class MailObserver:
 
         # 2. Junk → marked_spam
         if "junk" in role_set:
-            junk_mid = next(
-                mid for mid, r in current_roles.items() if r == "junk"
-            )
+            junk_mid = next(mid for mid, r in current_roles.items() if r == "junk")
             r = extract_reclassification(
                 email_id=email_id,
                 mailbox_id=junk_mid,
@@ -284,9 +276,7 @@ class MailObserver:
 
         # 3. Inbox AND open spam_decision → unmarked_spam (SP5c Fix B)
         if "inbox" in role_set and _has_open_spam_decision(email_id):
-            inbox_mid = next(
-                mid for mid, r in current_roles.items() if r == "inbox"
-            )
+            inbox_mid = next(mid for mid, r in current_roles.items() if r == "inbox")
             r = extract_reclassification(
                 email_id=email_id,
                 mailbox_id=inbox_mid,

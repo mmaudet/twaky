@@ -101,10 +101,7 @@ def insert_if_new(
 
 
 def list_recent(*, limit: int = 100) -> list[Observation]:
-    sql = (
-        "SELECT * FROM mail_sentinel_observation "
-        "ORDER BY observed_at DESC LIMIT %s"
-    )
+    sql = "SELECT * FROM mail_sentinel_observation ORDER BY observed_at DESC LIMIT %s"
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(sql, (limit,))
         return [_row(r) for r in cur.fetchall()]

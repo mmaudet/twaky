@@ -99,9 +99,7 @@ def test_bootstrap_stores_global_state_without_replay():
         created=["e1"],
         emails={"e1": {"id": "e1", "from": [{"email": "x@y.com"}]}},
     )
-    result = asyncio.run(
-        MailObserver().run_tick(adapter, owner_email="me@x.com")
-    )
+    result = asyncio.run(MailObserver().run_tick(adapter, owner_email="me@x.com"))
     assert result.observations_created == 0
 
     from twaky.sentinels.mail.store import mailbox_state as ms
@@ -145,9 +143,7 @@ def test_dispatch_sent_mail_to_draft_diff():
         "twaky.sentinels.mail.observer.extract_draft_diff",
         return_value=None,
     ) as diff_mock:
-        result = asyncio.run(
-            MailObserver().run_tick(adapter, owner_email="me@x.com")
-        )
+        result = asyncio.run(MailObserver().run_tick(adapter, owner_email="me@x.com"))
     diff_mock.assert_called_once()
     # No result tallied because extract returned None; the code path
     # was correctly taken.
@@ -329,8 +325,6 @@ def test_dispatch_skips_email_when_get_email_returns_none():
         created=["ghost"],
         emails={},  # ghost id not present → get_email returns None
     )
-    result = asyncio.run(
-        MailObserver().run_tick(adapter, owner_email="me@x.com")
-    )
+    result = asyncio.run(MailObserver().run_tick(adapter, owner_email="me@x.com"))
     assert result.observations_created == 0
     assert result.errors == []

@@ -14,6 +14,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(autouse=True)
 def _cleanup():
     from twaky.db import get_pool
+
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM mail_sentinel_memory")
     yield
@@ -45,6 +46,7 @@ def test_insert_default_source_is_manual():
 
 def test_touch_extends_expires_at():
     from twaky.db import get_pool
+
     m = mem.insert(kind="fact", scope="global", scope_value="*", content="foo")
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -61,12 +63,14 @@ def test_touch_extends_expires_at():
         assert row is not None
     # Assert expiry is > 6 days out
     from datetime import datetime
+
     delta = row[0] - datetime.now(UTC)
     assert delta.days >= 6
 
 
 def test_touch_skips_permanent_memories():
     from twaky.db import get_pool
+
     m = mem.insert(kind="fact", scope="global", scope_value="*", content="perm")
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -102,6 +106,7 @@ def test_list_for_prompt_ranks_sender_over_global():
 
 def test_list_for_prompt_filters_expired():
     from twaky.db import get_pool
+
     m = mem.insert(kind="fact", scope="global", scope_value="*", content="expired")
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -115,11 +120,14 @@ def test_list_for_prompt_filters_expired():
 def test_delete_removes_row():
     m = mem.insert(kind="fact", scope="global", scope_value="*", content="x")
     assert mem.delete(m.id) is True
-    assert mem.list_recent(limit=10) == [] or all(r.id != m.id for r in mem.list_recent(limit=10))
+    assert mem.list_recent(limit=10) == [] or all(
+        r.id != m.id for r in mem.list_recent(limit=10)
+    )
 
 
 def test_delete_missing_returns_false():
     from uuid import uuid4
+
     assert mem.delete(uuid4()) is False
 
 
@@ -128,6 +136,7 @@ def test_set_persist_true_nulls_expires_at():
     updated = mem.set_persist(m.id, True)
     assert updated is not None
     from twaky.db import get_pool
+
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT expires_at FROM mail_sentinel_memory WHERE id = %s", (m.id,)
@@ -142,6 +151,7 @@ def test_set_persist_false_resets_ttl():
     mem.set_persist(m.id, True)
     mem.set_persist(m.id, False)
     from twaky.db import get_pool
+
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT expires_at FROM mail_sentinel_memory WHERE id = %s", (m.id,)

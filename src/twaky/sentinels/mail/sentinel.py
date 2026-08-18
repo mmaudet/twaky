@@ -105,7 +105,9 @@ def _emit_decision_trace(ctx: Context, email_id: str, state: Any) -> None:
             {
                 "node": "select_memories",
                 "count": len(memories),
-                "memory_ids": [m.get("id") for m in memories if isinstance(m, dict)][:16],
+                "memory_ids": [m.get("id") for m in memories if isinstance(m, dict)][
+                    :16
+                ],
             }
         )
 

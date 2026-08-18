@@ -18,7 +18,9 @@ from twaky.sentinels.mail.store import memories as mem
 pytestmark = pytest.mark.integration
 
 
-def _build_ctx(*, owner_email: str = "mmaudet@linagora.com", memory_inject_max: int = 16) -> NodeContext:
+def _build_ctx(
+    *, owner_email: str = "mmaudet@linagora.com", memory_inject_max: int = 16
+) -> NodeContext:
     """Build a NodeContext with mocked base + mail — enough for these unit-level integration tests."""
     base = MagicMock()
     base.sentinel_row.config_values = {"memory_inject_max": memory_inject_max}
@@ -29,6 +31,7 @@ def _build_ctx(*, owner_email: str = "mmaudet@linagora.com", memory_inject_max: 
 @pytest.fixture(autouse=True)
 def _cleanup():
     from twaky.db import get_pool
+
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM mail_sentinel_memory")
         cur.execute("DELETE FROM mail_sentinel_learned_pattern")
@@ -59,7 +62,9 @@ def test_match_rules_short_circuits_on_trust_sender():
     ctx = _build_ctx()
     state = {
         "email_id": "e1",
-        "thread": [{"from": [{"email": "legit@x.com"}], "subject": "s", "textBody": "b"}],
+        "thread": [
+            {"from": [{"email": "legit@x.com"}], "subject": "s", "textBody": "b"}
+        ],
     }
     result = make_match_rules(ctx)(state)  # type: ignore[arg-type]
     assert result.get("matched_by") == "learned_pattern"
@@ -75,7 +80,9 @@ def test_match_rules_short_circuits_on_block_sender():
     ctx = _build_ctx()
     state = {
         "email_id": "e1",
-        "thread": [{"from": [{"email": "spammer@x.com"}], "subject": "s", "textBody": "b"}],
+        "thread": [
+            {"from": [{"email": "spammer@x.com"}], "subject": "s", "textBody": "b"}
+        ],
     }
     result = make_match_rules(ctx)(state)  # type: ignore[arg-type]
     assert result.get("matched_by") == "learned_pattern"
@@ -87,9 +94,15 @@ def test_select_memories_touches_returned_ids():
     from datetime import datetime
 
     from twaky.db import get_pool
+
     m = mem.insert(
-        kind="preference", scope="sender", scope_value="a@x.com",
-        content="x", source="auto_diff", sender_email="a@x.com", confidence=0.9,
+        kind="preference",
+        scope="sender",
+        scope_value="a@x.com",
+        content="x",
+        source="auto_diff",
+        sender_email="a@x.com",
+        confidence=0.9,
     )
     assert m is not None
     with get_pool().connection() as conn, conn.cursor() as cur:

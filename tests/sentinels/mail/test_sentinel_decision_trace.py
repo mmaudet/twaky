@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-
 from twaky.sentinels.base import Context
 from twaky.sentinels.mail.sentinel import _emit_decision_trace
 
@@ -126,7 +124,9 @@ def test_trace_empty_thread_still_produces_entries():
     }
     _emit_decision_trace(ctx, "e5", state)
 
-    assert len(ctx.trace) >= 4  # load_thread + match_rules + spam_triage + apply_actions + thread_status
+    assert (
+        len(ctx.trace) >= 4
+    )  # load_thread + match_rules + spam_triage + apply_actions + thread_status
     load = ctx.trace[0]
     assert load["thread_len"] == 0
     assert load["sender"] == ""

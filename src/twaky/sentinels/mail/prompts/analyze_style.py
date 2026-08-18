@@ -21,7 +21,7 @@ def analyze_style_prompt(
     Each sample is a dict with ``subject`` and ``body`` (plain text).
     """
     formatted_samples = "\n\n".join(
-        f'--- Sample {i + 1} ---\nSubject: {s.get("subject", "")}\n\n{s.get("body", "")}'
+        f"--- Sample {i + 1} ---\nSubject: {s.get('subject', '')}\n\n{s.get('body', '')}"
         for i, s in enumerate(samples)
     )
     return (

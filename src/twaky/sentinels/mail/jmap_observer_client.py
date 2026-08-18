@@ -92,9 +92,7 @@ class JmapObserverClient:
         """Return all mailboxes as a list of dicts (id, role, name, ...)."""
         payload = {
             "using": _JMAP_USING,
-            "methodCalls": [
-                ["Mailbox/get", {"accountId": self.account_id}, "0"]
-            ],
+            "methodCalls": [["Mailbox/get", {"accountId": self.account_id}, "0"]],
         }
         async with self._make_client() as client:
             resp = await client.post(
@@ -315,9 +313,7 @@ class JmapObserverClient:
                             "from": sender_email,
                             "after": since_ts,
                         },
-                        "sort": [
-                            {"property": "receivedAt", "isAscending": False}
-                        ],
+                        "sort": [{"property": "receivedAt", "isAscending": False}],
                         "limit": limit,
                     },
                     "q",

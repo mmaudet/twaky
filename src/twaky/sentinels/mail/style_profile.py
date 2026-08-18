@@ -170,11 +170,13 @@ def get_style_profile(owner_email: str) -> str | None:
     # 1. DB-first: auto-computed by SP7 analyzer
     try:
         from twaky.sentinels.mail.store import style_profile as sp_store
+
         row = sp_store.get(owner_email)
         if row is not None and row.profile:
             return row.profile
     except Exception as _e:  # noqa: BLE001 — degrade to static on any DB issue
         import logging as _logging
+
         _logging.getLogger(__name__).debug(
             "style_profile: DB lookup failed, falling back to static: %r", _e
         )

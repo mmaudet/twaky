@@ -759,7 +759,9 @@ class TestColdOutreachSignal:
                 "in my upcoming blog post?"
             ),
         }
-        fires, _reason = _cold_outreach_signal(email, owner_email="mmaudet@linagora.com")
+        fires, _reason = _cold_outreach_signal(
+            email, owner_email="mmaudet@linagora.com"
+        )
         assert fires
 
     def test_personalization_first_name_comma_subject_fires(self) -> None:

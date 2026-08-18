@@ -9,7 +9,6 @@ Usage (from inside the twaky-api container):
 
 from __future__ import annotations
 
-import sys
 import uuid
 from datetime import UTC, datetime
 

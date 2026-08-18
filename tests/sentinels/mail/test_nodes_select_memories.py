@@ -338,7 +338,10 @@ class TestSelectMemories:
         assert any(mem["id"] == str(m.id) for mem in out["memories"])
 
         with psycopg.connect(_dsn(), autocommit=True) as conn, conn.cursor() as cur:
-            cur.execute("SELECT expires_at FROM mail_sentinel_memory WHERE id = %s", (str(m.id),))
+            cur.execute(
+                "SELECT expires_at FROM mail_sentinel_memory WHERE id = %s",
+                (str(m.id),),
+            )
             row = cur.fetchone()
 
         assert row is not None

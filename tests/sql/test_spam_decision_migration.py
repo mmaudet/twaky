@@ -62,12 +62,16 @@ def test_config_schema_spam_filter_enabled():
 
 def test_config_schema_spam_llm_confidence_threshold():
     text = SCRIPT.read_text()
-    assert "jsonb_set(config_schema, '{properties,spam_llm_confidence_threshold}'" in text
+    assert (
+        "jsonb_set(config_schema, '{properties,spam_llm_confidence_threshold}'" in text
+    )
 
 
 def test_config_schema_spam_llm_newsletter_threshold():
     text = SCRIPT.read_text()
-    assert "jsonb_set(config_schema, '{properties,spam_llm_newsletter_threshold}'" in text
+    assert (
+        "jsonb_set(config_schema, '{properties,spam_llm_newsletter_threshold}'" in text
+    )
 
 
 def test_config_schema_spam_purge_active_days():

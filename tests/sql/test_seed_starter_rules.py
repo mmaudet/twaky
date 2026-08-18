@@ -69,4 +69,4 @@ def test_uses_correct_uses_capabilities_header() -> None:
     body = MIGRATION.read_text()
     assert "psql -v ON_ERROR_STOP=1" in body
     assert '--username "$POSTGRES_USER"' in body
-    assert 'set -euo pipefail' in body
+    assert "set -euo pipefail" in body
