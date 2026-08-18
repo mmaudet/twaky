@@ -8,13 +8,24 @@
  *     login prompt appears during the OAuth code flow)
  *   - The `mail` sentinel already in the DB with `JMAP_OAUTH_*` env vars set
  *
- * NOTE (SP6b T29 carry-over): this spec is lint-clean but execution is deferred
- * until the `.cache/uv` permission-denied issue inside the twaky-api container
- * is resolved (sign-session.py cannot run inside the container in CI).
- * Document this status in the task-12-report.md.
+ * NOT RUNNABLE IN CI, BY NATURE. Step 3 drives a real OAuth authorize round
+ * trip against auth.twake-dev.maudet.cloud and depends on an operator's
+ * LemonLDAP-NG session already being present in storageState. A CI runner has
+ * neither, and pointing CI at the deployment's IDP would be the wrong fix. It
+ * is therefore opt-in: set TWAKY_E2E_LIVE_OIDC=1 to run it against a real
+ * stack.
+ *
+ * (The older note here blamed a `.cache/uv` permission error inside
+ * twaky-api. That one is fixed — the specs no longer shell out to `uv run`.)
  */
 
 import { test, expect } from './fixtures'
+
+test.skip(
+    !process.env.TWAKY_E2E_LIVE_OIDC,
+    'needs a real IDP and a pre-authenticated operator session; ' +
+        'set TWAKY_E2E_LIVE_OIDC=1 to run',
+)
 
 test(
     'sentinels-mail-auth-connect: connect JMAP account via OAuth flow',

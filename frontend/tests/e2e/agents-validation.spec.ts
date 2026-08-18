@@ -15,9 +15,11 @@ test('clearing prompt disables Save and turns counter red', async ({ signedInPag
     await prompt.fill('x'.repeat(8001))
     const counter = page.getByText(/8,001 \/ 8,000/)
     await expect(counter).toBeVisible()
-    // Counter has the red class (test via CSS color computed style).
-    const color = await counter.evaluate((el) => getComputedStyle(el).color)
-    expect(color).toMatch(/rgb\(220, 38, 38\)|rgb\(185, 28, 28\)/)  // Tailwind red-600 or red-700
+    // Assert the class, not the computed colour. Tailwind v4 defines its
+    // palette in oklch, so getComputedStyle().color serialises as
+    // "lab(48.4493 77.4328 61.5452)" — a moving target across Tailwind and
+    // browser versions, and not what "turns red" actually means here.
+    await expect(counter).toHaveClass(/text-red-600/)
 
     // Save also disabled at this state.
     await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
