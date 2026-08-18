@@ -4,7 +4,7 @@ Bypasses the Atlas daemon: declares → start_planning → commit_plan →
 request_user_input(kind="approve_draft"). Prints the mission id to stdout.
 
 Usage:
-    docker compose exec -T twaky-api uv run python -m frontend.tests.e2e.seed_awaiting_user
+    docker compose exec -T twaky-api python -m frontend.tests.e2e.seed_awaiting_user
     (or copy this file into a docker-exec-friendly path)
 """
 

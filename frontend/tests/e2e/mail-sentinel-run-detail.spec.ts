@@ -8,7 +8,7 @@ function seedSentinelRun(): string {
         { cwd: process.cwd() + '/..' },
     )
     return execSync(
-        `docker compose exec -T twaky-api uv run python /tmp/seed-sentinel-run.py`,
+        `docker compose exec -T twaky-api python /tmp/seed-sentinel-run.py`,
         { cwd: process.cwd() + '/..' },
     ).toString().trim()
 }

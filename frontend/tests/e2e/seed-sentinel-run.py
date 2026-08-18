@@ -4,7 +4,7 @@ Inserts a completed run for the 'mail' sentinel with a fake event_ref
 and a minimal trace. Prints the run UUID to stdout.
 
 Usage (from inside the twaky-api container):
-    uv run python /tmp/seed-sentinel-run.py
+    python /tmp/seed-sentinel-run.py
 """
 
 from __future__ import annotations

@@ -185,9 +185,14 @@ jobs:
             sleep 2
           done
           [ "$status" = "healthy" ] || (echo 'twaky-frontend never became healthy' && docker compose logs && exit 1)
-      - name: Copy seed helper into API container
+      - name: Copy seed helpers into API container
         working-directory: .
-        run: docker compose cp frontend/tests/e2e/seed-awaiting-user.py twaky-api:/tmp/seed-awaiting-user.py
+        # All three, not just the first: the specs exec them from /tmp inside
+        # twaky-api, and a missing one fails its whole spec.
+        run: |
+          for helper in seed-awaiting-user seed-sentinel-run seed-spam-decision; do
+            docker compose cp "frontend/tests/e2e/$helper.py" "twaky-api:/tmp/$helper.py"
+          done
       - name: E2E tests
         env:
           TWAKY_TEST_STACK_URL: http://localhost:3000
