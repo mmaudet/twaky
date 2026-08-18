@@ -20,6 +20,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(autouse=True)
 def _cleanup():
     from twaky.db import get_pool
+
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM mail_sentinel_memory")
         cur.execute("DELETE FROM mail_sentinel_observation")
@@ -33,9 +34,9 @@ def _insert_mission_with_artifact(*, message_id: str, ai_draft: str, owner: str)
     from twaky.db import get_pool
 
     mission_id = uuid4()
-    artifacts = json.dumps([
-        {"kind": "draft", "body": ai_draft, "in_reply_to_message_id": message_id}
-    ])
+    artifacts = json.dumps(
+        [{"kind": "draft", "body": ai_draft, "in_reply_to_message_id": message_id}]
+    )
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO mission (id, owner_email, declared_by, intent_text, "
@@ -123,6 +124,7 @@ def test_llm_extraction_creates_memories_and_transitions_mission():
     assert len(r.memory_ids) == 1
 
     from twaky.db import get_pool
+
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT state FROM mission WHERE id=%s", (mid,))
         row = cur.fetchone()

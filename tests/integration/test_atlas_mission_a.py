@@ -29,6 +29,20 @@ def _reachable() -> bool:
 pytestmark = pytest.mark.skipif(not _reachable(), reason="twaky-pg not reachable")
 
 
+@pytest.fixture(autouse=True)
+def _checkpointer_tables():
+    """Create the langgraph checkpoint_* tables before the mission runs.
+
+    sql/005_init_checkpointer.sh is a deliberate no-op: the tables are created
+    at Atlas boot by setup_checkpointer_tables(). Nothing boots Atlas here, so
+    against a freshly provisioned database these tests failed with
+    UndefinedTable: relation "checkpoints" does not exist. Idempotent.
+    """
+    from twaky.missions.checkpointer import setup_checkpointer_tables
+
+    setup_checkpointer_tables()
+
+
 def test_mission_a_ends_awaiting_user():
     pending_payload = json.dumps(
         {

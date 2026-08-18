@@ -299,7 +299,9 @@ class TestDraftReply:
             node(state)
 
         # Second draft
-        draft_output2 = DraftReplyOutput(body="Draft 2 body for testing.", language="en")
+        draft_output2 = DraftReplyOutput(
+            body="Draft 2 body for testing.", language="en"
+        )
         with patch(
             "twaky.sentinels.mail.nodes.structured_call",
             return_value=draft_output2,
@@ -572,9 +574,7 @@ class TestHasMeaningfulBody:
         from twaky.sentinels.mail.nodes import _has_meaningful_body
 
         assert (
-            _has_meaningful_body(
-                "Bonjour Gabriel,\n\nBien à vous,\n\nMichel-Marie"
-            )
+            _has_meaningful_body("Bonjour Gabriel,\n\nBien à vous,\n\nMichel-Marie")
             is False
         )
 

@@ -124,9 +124,7 @@ def extract_draft_diff(
         )
         return ExtractionResult(outcome=ExtractionOutcome.SKIPPED_NO_MATCH)
 
-    mission = _find_matching_mission(
-        owner_email=owner_email, in_reply_to=in_reply_to
-    )
+    mission = _find_matching_mission(owner_email=owner_email, in_reply_to=in_reply_to)
     if mission is None:
         obs_store.insert_if_new(
             email_id=email_id,
@@ -190,9 +188,7 @@ def extract_draft_diff(
             extraction_outcome=ExtractionOutcome.ERROR,
             error_repr=repr(e),
         )
-        return ExtractionResult(
-            outcome=ExtractionOutcome.ERROR, error_repr=repr(e)
-        )
+        return ExtractionResult(outcome=ExtractionOutcome.ERROR, error_repr=repr(e))
 
     _delete_memories(out.should_delete_previous_memory_ids)
 
@@ -223,9 +219,7 @@ def extract_draft_diff(
         memory_ids=memory_ids,
     )
 
-    return ExtractionResult(
-        outcome=ExtractionOutcome.EXTRACTED, memory_ids=memory_ids
-    )
+    return ExtractionResult(outcome=ExtractionOutcome.EXTRACTED, memory_ids=memory_ids)
 
 
 __all__ = ["extract_draft_diff"]

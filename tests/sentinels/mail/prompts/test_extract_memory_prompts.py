@@ -11,6 +11,7 @@ from twaky.sentinels.mail.schemas_write_side import (
 
 def test_extracted_memory_content_max_200():
     import pytest
+
     with pytest.raises(ValueError):
         ExtractedMemory(
             kind="preference",
@@ -23,6 +24,7 @@ def test_extracted_memory_content_max_200():
 
 def test_extracted_memory_confidence_range():
     import pytest
+
     with pytest.raises(ValueError):
         ExtractedMemory(
             kind="fact",

@@ -119,6 +119,7 @@ def test_delete_memory_returns_204(client):
 
 def test_delete_memory_404_when_missing(client):
     from uuid import uuid4
+
     resp = client.delete(f"/mail-sentinel/memories/{uuid4()}")
     assert resp.status_code == 404
 

@@ -45,6 +45,7 @@ class FakeAdapter:
 
 def _cleanup_all():
     from twaky.db import get_pool
+
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM mail_sentinel_style_profile")
         cur.execute("DELETE FROM mail_sentinel_mailbox_state")
@@ -87,6 +88,7 @@ def _fake_samples(n: int) -> list[dict]:
 def test_triggers_analysis_when_no_profile_exists():
     """Bootstrap path: no DB row → analysis runs."""
     import asyncio
+
     adapter = FakeAdapter(sent_total=200, sent_samples=_fake_samples(10))
     output = StyleProfileOutput(
         profile="Fresh auto-computed profile content — long enough to satisfy the min-length constraint of one hundred characters."
@@ -95,7 +97,9 @@ def test_triggers_analysis_when_no_profile_exists():
         "twaky.sentinels.mail.analyze_style.structured_call",
         return_value=output,
     ):
-        asyncio.run(MailObserver().run_tick(adapter, owner_email="mmaudet@linagora.com"))
+        asyncio.run(
+            MailObserver().run_tick(adapter, owner_email="mmaudet@linagora.com")
+        )
 
     stored = sp_store.get("mmaudet@linagora.com")
     assert stored is not None
@@ -105,6 +109,7 @@ def test_triggers_analysis_when_no_profile_exists():
 
 def test_skips_analysis_when_delta_below_threshold():
     import asyncio
+
     sp_store.upsert(
         owner_email="mmaudet@linagora.com",
         profile="existing",
@@ -115,7 +120,9 @@ def test_skips_analysis_when_delta_below_threshold():
     with patch(
         "twaky.sentinels.mail.analyze_style.structured_call",
     ) as mock_llm:
-        asyncio.run(MailObserver().run_tick(adapter, owner_email="mmaudet@linagora.com"))
+        asyncio.run(
+            MailObserver().run_tick(adapter, owner_email="mmaudet@linagora.com")
+        )
     mock_llm.assert_not_called()
     stored = sp_store.get("mmaudet@linagora.com")
     assert stored is not None
@@ -124,6 +131,7 @@ def test_skips_analysis_when_delta_below_threshold():
 
 def test_triggers_analysis_when_delta_at_threshold():
     import asyncio
+
     sp_store.upsert(
         owner_email="mmaudet@linagora.com",
         profile="existing",
@@ -138,7 +146,9 @@ def test_triggers_analysis_when_delta_at_threshold():
         "twaky.sentinels.mail.analyze_style.structured_call",
         return_value=output,
     ):
-        asyncio.run(MailObserver().run_tick(adapter, owner_email="mmaudet@linagora.com"))
+        asyncio.run(
+            MailObserver().run_tick(adapter, owner_email="mmaudet@linagora.com")
+        )
     stored = sp_store.get("mmaudet@linagora.com")
     assert stored is not None
     assert "Refreshed profile" in stored.profile
@@ -148,6 +158,7 @@ def test_triggers_analysis_when_delta_at_threshold():
 def test_analysis_failure_does_not_break_tick(caplog):
     """LLM failure logged as warning, does not raise from run_tick."""
     import asyncio
+
     adapter = FakeAdapter(sent_total=200, sent_samples=_fake_samples(10))
     with patch(
         "twaky.sentinels.mail.analyze_style.structured_call",

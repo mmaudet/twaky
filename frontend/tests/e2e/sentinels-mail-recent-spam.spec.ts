@@ -31,7 +31,7 @@ function seedSpamDecision(): string {
         { cwd: process.cwd() + '/..' },
     )
     return execSync(
-        `docker compose exec -T twaky-api uv run python /tmp/seed-spam-decision.py`,
+        `docker compose exec -T twaky-api python /tmp/seed-spam-decision.py`,
         { cwd: process.cwd() + '/..' },
     ).toString().trim()
 }

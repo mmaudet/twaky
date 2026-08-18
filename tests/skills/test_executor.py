@@ -122,3 +122,25 @@ def test_crash_via_os_exit_maps_to_skill_crashed():
     with pytest.raises(SkillCrashed) as exc:
         run_skill(src, args={}, config={})
     assert "42" in str(exc.value)
+
+
+class TestLargeResults:
+    """A result bigger than the pipe buffer must come back, not time out.
+
+    ``pipe.send()`` blocks in the child once the OS pipe buffer (64 KiB on
+    Linux) is full, and only unblocks when the parent drains it. A parent that
+    joins before reading deadlocks until the timeout expires and reports a
+    perfectly successful skill as ``SkillTimeout``.
+    """
+
+    def test_result_larger_than_the_pipe_buffer_is_returned(self):
+        # 1 MiB — comfortably past the 64 KiB pipe buffer.
+        source = "def run(**kwargs):\n    return 'x' * (1024 * 1024)\n"
+        result = run_skill(source, {}, {}, timeout_s=20)
+        assert result == "x" * (1024 * 1024)
+
+    def test_a_genuine_hang_still_times_out(self):
+        """The large-result fix must not blunt real timeout detection."""
+        source = "def run(**kwargs):\n    import time\n    time.sleep(30)\n"
+        with pytest.raises(SkillTimeout):
+            run_skill(source, {}, {}, timeout_s=2)

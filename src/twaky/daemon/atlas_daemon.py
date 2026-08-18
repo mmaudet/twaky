@@ -384,7 +384,7 @@ async def _main_loop() -> None:
 
     async def _listener():
         async for ch, payload in listen(
-            ["mission_declared", "mission_resumed"], settings.pg_dsn
+            ["mission_declared", "mission_resumed"], settings.pg_dsn, stop_event=stop
         ):
             if stop.is_set():
                 return

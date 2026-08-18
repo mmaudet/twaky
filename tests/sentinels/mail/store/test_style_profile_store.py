@@ -12,6 +12,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(autouse=True)
 def _cleanup():
     from twaky.db import get_pool
+
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM mail_sentinel_style_profile")
     yield
@@ -46,6 +47,7 @@ def test_upsert_updates_existing_and_refreshes_computed_at():
         sample_size=10,
     )
     import time
+
     time.sleep(0.01)
     r2 = sp.upsert(
         owner_email="x@y.com",
@@ -74,7 +76,11 @@ def test_delete_returns_false_when_absent():
 
 
 def test_list_all_orders_by_owner_email():
-    sp.upsert(owner_email="b@y.com", profile="p", sent_count_at_compute=1, sample_size=1)
-    sp.upsert(owner_email="a@y.com", profile="p", sent_count_at_compute=1, sample_size=1)
+    sp.upsert(
+        owner_email="b@y.com", profile="p", sent_count_at_compute=1, sample_size=1
+    )
+    sp.upsert(
+        owner_email="a@y.com", profile="p", sent_count_at_compute=1, sample_size=1
+    )
     rows = sp.list_all()
     assert [r.owner_email for r in rows] == ["a@y.com", "b@y.com"]

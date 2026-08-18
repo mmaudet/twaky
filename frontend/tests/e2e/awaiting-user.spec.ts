@@ -1,11 +1,11 @@
-import { test, expect } from './fixtures'
+import { test, expect, OWNER_EMAIL } from './fixtures'
 import { execSync } from 'node:child_process'
 
 function seedAwaitingUser(): string {
     // Runs the Python helper from inside twaky-api container.
     // Adjust the path if the file isn't mounted — for CI, we copy it into place.
     return execSync(
-        `docker compose exec -T twaky-api uv run python /tmp/seed-awaiting-user.py michel.maudet@linagora.com`,
+        `docker compose exec -T twaky-api python /tmp/seed-awaiting-user.py ${OWNER_EMAIL}`,
         { cwd: process.cwd() + '/..' },
     ).toString().trim()
 }

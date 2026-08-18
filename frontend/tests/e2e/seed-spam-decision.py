@@ -4,12 +4,11 @@ Inserts one spam decision for the Recent Spam tab E2E test.
 Prints the decision UUID to stdout.
 
 Usage (from inside the twaky-api container):
-    uv run python /tmp/seed-spam-decision.py
+    python /tmp/seed-spam-decision.py
 """
 
 from __future__ import annotations
 
-import sys
 import uuid
 from datetime import UTC, datetime
 

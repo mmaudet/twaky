@@ -184,9 +184,7 @@ async def test_get_email_returns_email_dict() -> None:
 
 @pytest.mark.asyncio
 async def test_get_email_not_found_returns_none() -> None:
-    t = _MockTransport(
-        _jmap_resp("Email/get", {"list": [], "notFound": ["e999"]})
-    )
+    t = _MockTransport(_jmap_resp("Email/get", {"list": [], "notFound": ["e999"]}))
     result = await _make(t).get_email("e999")
     assert result is None
 

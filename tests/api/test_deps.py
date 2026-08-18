@@ -2,37 +2,37 @@
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from starlette.middleware.sessions import SessionMiddleware
 
-# Import testing to ensure it's loaded before we reload session in fixtures
-from twaky.api import testing  # noqa: F401
 from twaky.api.deps import require_owner
 from twaky.api.session import SESSION_COOKIE_NAME, sign_session
+from twaky.config import settings
 
-
-def _setup_test_env(monkeypatch):
-    """Setup test environment with required env vars."""
-    monkeypatch.setenv("API_SESSION_SECRET", "test-secret-32bytes-min-abcdefgh")
-    monkeypatch.setenv("TWAKY_OWNER_EMAIL", "alice@x")
-    # Force settings reload to pick up env vars, then reload modules that import it
-    # Note: We don't reload twaky.api.testing to preserve the identity check in tests
-    import twaky.api.deps
-    import twaky.api.session
-    import twaky.config
-
-    importlib.reload(twaky.config)
-    importlib.reload(twaky.api.session)
-    importlib.reload(twaky.api.deps)
+_TEST_SECRET = "test-secret-32bytes-min-abcdefgh"
 
 
 @pytest.fixture
 def secret_env(monkeypatch):
-    _setup_test_env(monkeypatch)
+    """Point the settings singleton at this module's test identity.
+
+    Patches the *object*, never the environment. ``monkeypatch.setenv`` alone
+    does nothing here — pydantic-settings reads the environment once, at
+    construction — and the obvious workaround, ``importlib.reload(twaky.config)``,
+    is worse than the problem: it rebinds ``twaky.config.settings`` to a brand
+    new instance for the remainder of the session, while the ~120 modules that
+    did ``from twaky.config import settings`` keep the old one. Tests running
+    later then patch one object and get checked against another (observed as
+    401s, then 403s, in tests/integration/test_api_*.py).
+
+    ``require_owner`` and ``sign_session`` both read their attributes off
+    ``settings`` at call time, so setattr is sufficient — and monkeypatch
+    reverts it.
+    """
+    monkeypatch.setattr(settings, "api_session_secret", _TEST_SECRET)
+    monkeypatch.setattr(settings, "twaky_owner_email", "alice@x")
     yield
 
 
@@ -41,7 +41,7 @@ def test_app(secret_env):
     app = FastAPI()
     app.add_middleware(
         SessionMiddleware,
-        secret_key="test-secret-32bytes-min-abcdefgh",
+        secret_key=_TEST_SECRET,
         session_cookie=SESSION_COOKIE_NAME,
         max_age=28800,
         same_site="lax",

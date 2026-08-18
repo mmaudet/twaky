@@ -42,14 +42,8 @@ def test_creates_mailbox_state_table():
 def test_creates_observation_table_with_unique():
     text = SCRIPT.read_text()
     assert "CREATE TABLE IF NOT EXISTS public.mail_sentinel_observation" in text
-    assert (
-        "observation_type   TEXT NOT NULL"
-        in text
-    )
-    assert (
-        "extraction_outcome TEXT NOT NULL"
-        in text
-    )
+    assert "observation_type   TEXT NOT NULL" in text
+    assert "extraction_outcome TEXT NOT NULL" in text
     assert "UNIQUE (email_id, mailbox_id, observation_type)" in text
 
 

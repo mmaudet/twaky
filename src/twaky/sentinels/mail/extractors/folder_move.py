@@ -85,7 +85,9 @@ def extract_folder_move(
             scope_value=out.memory.scope_value,
             content=out.memory.content,
             source="auto_move",
-            sender_email=(sender_email.lower() if out.memory.scope == "sender" else None),
+            sender_email=(
+                sender_email.lower() if out.memory.scope == "sender" else None
+            ),
             confidence=out.memory.confidence,
         )
         if m is not None:

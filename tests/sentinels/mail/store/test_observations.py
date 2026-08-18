@@ -18,6 +18,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(autouse=True)
 def _cleanup():
     from twaky.db import get_pool
+
     with get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM mail_sentinel_observation")
     yield

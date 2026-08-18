@@ -25,9 +25,9 @@ def draft_diff_prompt(
         '  "should_delete_previous_memory_ids": array of UUIDs (default [])\n\n'
         "Guidelines:\n"
         "- Only extract lessons that will apply beyond this specific mail.\n"
-        "- Prefer scope=\"sender\" when the change is specific to this correspondent.\n"
-        "- Prefer scope=\"domain\" when the change would apply to any correspondent in the same organization.\n"
-        "- Prefer scope=\"global\" only when the lesson clearly applies to every reply the user writes.\n"
+        '- Prefer scope="sender" when the change is specific to this correspondent.\n'
+        '- Prefer scope="domain" when the change would apply to any correspondent in the same organization.\n'
+        '- Prefer scope="global" only when the lesson clearly applies to every reply the user writes.\n'
         "- Ignore purely factual insertions the user added (dates, numbers, names present in the incoming mail) — those are context, not lessons.\n"
         "- Include a confidence between 0 and 1. Use >=0.9 only when the diff clearly demonstrates a durable preference.\n"
         "- If a previous memory contradicts what the user just did, list its ID under should_delete_previous_memory_ids.\n"

@@ -32,11 +32,15 @@ class ExtractionResult:
 
 def _observation_type(direction: Literal["in", "out"]) -> ObservationType:
     return (
-        ObservationType.MARKED_SPAM if direction == "in" else ObservationType.UNMARKED_SPAM
+        ObservationType.MARKED_SPAM
+        if direction == "in"
+        else ObservationType.UNMARKED_SPAM
     )
 
 
-def _maybe_restore_spam_decision(email_id: str, direction: Literal["in", "out"]) -> None:
+def _maybe_restore_spam_decision(
+    email_id: str, direction: Literal["in", "out"]
+) -> None:
     if direction != "out":
         return
     with get_pool().connection() as conn, conn.cursor() as cur:

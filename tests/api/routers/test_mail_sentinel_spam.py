@@ -293,7 +293,10 @@ def test_restore_502_when_jmap_fails(monkeypatch):
 
     # The error message must be sanitized — no JMAP session URL or hostname leakage
     error_message = r.json()["error"]["message"]
-    assert "jmap" not in error_message.lower() or "rejected the restore request" in error_message
+    assert (
+        "jmap" not in error_message.lower()
+        or "rejected the restore request" in error_message
+    )
     # Raw exception string must not bleed through (no JMAP server error string)
     assert "JMAP server error" not in error_message
 

@@ -58,7 +58,7 @@ def confirm_pattern_prompt(
         f"Subject: {subject}\n"
         "Preview:\n"
         f'"""\n{preview}\n"""\n\n'
-        "Return JSON: {\"confirms\": true|false, \"reason\": \"<one short sentence>\"}\n\n"
+        'Return JSON: {"confirms": true|false, "reason": "<one short sentence>"}\n\n'
         "Guidelines:\n"
         "- confirms=true when the pattern's classification still makes sense for THIS mail.\n"
         "- confirms=false when the sender clearly changed behaviour (a formerly-spammy "

@@ -110,7 +110,9 @@ def _row_to_memory(row: dict[str, Any]) -> MailMemory:
         source=row.get("source", "manual"),
         sender_email=row.get("sender_email"),
         mission_id=row.get("mission_id"),
-        confidence=(float(row["confidence"]) if row.get("confidence") is not None else None),
+        confidence=(
+            float(row["confidence"]) if row.get("confidence") is not None else None
+        ),
     )
 
 
@@ -163,8 +165,15 @@ def insert(
         "RETURNING *"
     )
     params = [
-        kind, scope, scope_value, content, json.dumps(evidence),
-        source, sender_email, mission_id, confidence,
+        kind,
+        scope,
+        scope_value,
+        content,
+        json.dumps(evidence),
+        source,
+        sender_email,
+        mission_id,
+        confidence,
     ]
 
     with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:

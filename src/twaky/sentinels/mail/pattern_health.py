@@ -172,9 +172,7 @@ async def run_pattern_health_check(
                 verdict.reason[:120],
             )
         else:
-            result = lp_store.decay_confidence(
-                pattern.sender_email, pattern.rule_name
-            )
+            result = lp_store.decay_confidence(pattern.sender_email, pattern.rule_name)
             if result is None:
                 stats["deleted"] += 1
                 log.warning(

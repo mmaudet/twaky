@@ -38,6 +38,12 @@ services:
       LANGFUSE_PG_USER: ${LANGFUSE_PG_USER:-langfuse}
       LANGFUSE_PG_PASSWORD: ${LANGFUSE_PG_PASSWORD}
       LANGFUSE_PG_DB: ${LANGFUSE_PG_DB:-langfuse}
+      # Consumed by sql/003_init_metabase.sh at first-boot provisioning, which
+      # hard-fails (`: "${METABASE_PG_USER:?...}"`) when they are absent. The
+      # metabase service reads the same values to connect afterwards.
+      METABASE_PG_USER: ${METABASE_PG_USER:-metabase}
+      METABASE_PG_PASSWORD: ${METABASE_PG_PASSWORD}
+      METABASE_PG_DB: ${METABASE_PG_DB:-metabase}
     volumes:
       - twaky_pg_data:/var/lib/postgresql/data
       - ./sql:/docker-entrypoint-initdb.d:ro

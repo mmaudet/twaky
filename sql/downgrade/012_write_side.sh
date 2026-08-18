@@ -3,7 +3,7 @@
 # Run only after disabling MAIL_SENTINEL_OBSERVER_ENABLED and stopping twaky-sentinel.
 #
 # For existing volumes:
-#   docker exec -e POSTGRES_USER=twaky -i twaky-pg bash < sql/012_downgrade_write_side.sh
+#   docker exec -e POSTGRES_USER=twaky -i twaky-pg bash < sql/downgrade/012_write_side.sh
 set -euo pipefail
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-twaky}" <<-'EOSQL'

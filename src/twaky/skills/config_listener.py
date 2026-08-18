@@ -23,7 +23,9 @@ log = logging.getLogger("twaky.skills.config_listener")
 async def run(stop_event: asyncio.Event) -> None:
     log.info("skill config listener starting")
     try:
-        async for ch, payload in listen(["skill_changed"], settings.pg_dsn):
+        async for ch, payload in listen(
+            ["skill_changed"], settings.pg_dsn, stop_event=stop_event
+        ):
             if stop_event.is_set():
                 return
             if ch == "skill_changed":

@@ -70,18 +70,37 @@ def test_prompt_omits_rspamd_section_when_none() -> None:
     )
 
 
-def test_prompt_biases_toward_none() -> None:
-    """Prompt must emphasize 'uncertain' and 'prefer accuracy over recall' bias."""
+def _bucket_section(prompt: str, bucket: str) -> str:
+    """Return the prompt text describing *bucket*, up to the next bucket header.
+
+    Buckets are introduced as ``**<name>**`` markers; the section runs to the
+    next marker (or to the end of the prompt for the last bucket).
+    """
+    marker = f"**{bucket}**"
+    start = prompt.find(marker)
+    assert start != -1, f"bucket header {marker!r} not found in prompt"
+    rest = prompt[start + len(marker) :]
+    nxt = rest.find("**")
+    return rest if nxt == -1 else rest[:nxt]
+
+
+def test_uncertain_mail_is_routed_to_the_none_bucket() -> None:
+    """Genuinely uncertain mail must be documented as belonging to ``none``.
+
+    Asserts the *placement* of the uncertainty instruction rather than a
+    literal sentence. The prompt is retuned regularly (cf. 6d04832, which
+    dropped the old "prefer accuracy over recall" wording while keeping the
+    behaviour); pinning exact phrasing breaks the test on every reword
+    without catching a behavioural regression.
+    """
     prompt = spam_check_prompt(
         _state(),
         headers_summary="SPF: pass",
         rspamd_action=None,
         owner_email="alice@x",
     )
-    # Check for keywords indicating bias toward 'none' and accuracy preference
-    assert "uncertain" in prompt.lower(), (
-        "Expected 'uncertain' keyword in prompt for bias toward 'none'"
-    )
-    assert "prefer accuracy over recall" in prompt.lower(), (
-        "Expected 'prefer accuracy over recall' instruction in prompt"
+    none_section = _bucket_section(prompt, "none").lower()
+    assert "uncertain" in none_section, (
+        "The 'none' bucket must be the documented destination for uncertain "
+        f"mail; its section reads: {none_section!r}"
     )

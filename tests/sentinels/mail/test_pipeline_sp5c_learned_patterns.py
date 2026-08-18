@@ -87,7 +87,9 @@ def _activate_pattern(sender: str, rule_name: str) -> None:
 
 
 def _no_llm_stub(*_args, **_kwargs) -> Any:
-    raise AssertionError("Pipeline must not call the LLM when a learned pattern matches")
+    raise AssertionError(
+        "Pipeline must not call the LLM when a learned pattern matches"
+    )
 
 
 class TestLearnedPatternLabel:

@@ -42,7 +42,9 @@ def test_mail_sentinel_observer_defaults(monkeypatch):
 
 def test_mail_sentinel_observer_from_env(monkeypatch):
     monkeypatch.setenv("MAIL_SENTINEL_OBSERVER_ENABLED", "true")
-    monkeypatch.setenv("MAIL_SENTINEL_WATCHED_MAILBOX_ROLES", "Sent, Junk , trash , archive")
+    monkeypatch.setenv(
+        "MAIL_SENTINEL_WATCHED_MAILBOX_ROLES", "Sent, Junk , trash , archive"
+    )
     monkeypatch.setenv("TWAKY_OWNER_EMAIL", "alice@example.com")
     s = Settings(_env_file=None)  # type: ignore[call-arg]
     assert s.mail_sentinel_observer_enabled is True

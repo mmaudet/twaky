@@ -95,11 +95,7 @@ async def test_stop_event_causes_listen_to_return():
 
         # Verify no notify_run threads remain after a short grace period.
         await asyncio.sleep(0.2)
-        leaked = [
-            t
-            for t in threading.enumerate()
-            if t.name.startswith("notify_run")
-        ]
+        leaked = [t for t in threading.enumerate() if t.name.startswith("notify_run")]
         assert leaked == [], f"Leaked notify_run threads: {leaked}"
 
 
@@ -131,9 +127,7 @@ async def test_broker_stop_joins_within_2s():
         leaked: list = ["placeholder"]
         while time.monotonic() < deadline and leaked:
             leaked = [
-                t
-                for t in threading.enumerate()
-                if t.name.startswith("notify_run")
+                t for t in threading.enumerate() if t.name.startswith("notify_run")
             ]
             if leaked:
                 await asyncio.sleep(0.1)

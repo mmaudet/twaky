@@ -17,6 +17,36 @@ from twaky.config import settings
 
 SESSION_COOKIE_NAME = "twaky_session"
 _SESSION_MAX_AGE = 28800  # 8 hours, matches spec §5.4
+_MIN_SESSION_SECRET_BYTES = 32
+
+
+class WeakSessionSecret(RuntimeError):
+    """Raised when API_SESSION_SECRET is unset or too short to sign sessions."""
+
+
+def check_session_secret(secret: str) -> None:
+    """Fail fast when the session signing key cannot protect a session cookie.
+
+    ``require_owner`` trusts ``session["email"]`` outright, so a forgeable
+    cookie is a full authentication bypass — not a degraded mode. The setting
+    defaults to ``""`` on purpose (the ingest / projector / sentinel workers
+    import ``settings`` and never serve HTTP), which means nothing would stop
+    the API from booting with an empty signing key. This is the check that
+    does. Called from the app lifespan, i.e. on every real uvicorn startup.
+    """
+    if not secret:
+        raise WeakSessionSecret(
+            "API_SESSION_SECRET is not set — refusing to start the API. "
+            "Session cookies would be signed with an empty key, making owner "
+            "impersonation trivial. Generate one with `openssl rand -hex 32` "
+            "and add it to .env."
+        )
+    if len(secret.encode()) < _MIN_SESSION_SECRET_BYTES:
+        raise WeakSessionSecret(
+            f"API_SESSION_SECRET is {len(secret.encode())} bytes, "
+            f"below the {_MIN_SESSION_SECRET_BYTES}-byte minimum — refusing to "
+            "start the API. Generate one with `openssl rand -hex 32`."
+        )
 
 
 def _signer() -> itsdangerous.TimestampSigner:
@@ -50,4 +80,10 @@ def unsign_session(cookie_value: str, max_age: int = _SESSION_MAX_AGE) -> dict |
         return None
 
 
-__all__ = ["SESSION_COOKIE_NAME", "sign_session", "unsign_session"]
+__all__ = [
+    "SESSION_COOKIE_NAME",
+    "WeakSessionSecret",
+    "check_session_secret",
+    "sign_session",
+    "unsign_session",
+]
