@@ -7,12 +7,18 @@ Tests that the infrastructure wired in tests/conftest.py correctly gates
 from __future__ import annotations
 
 import os
+import pathlib
 import subprocess
 import sys
 
 import pytest
 
 from tests.conftest import _jmap_live_enabled  # type: ignore[attr-defined]
+
+# The sub-pytest must run from the repo root so its rootdir, conftest and
+# relative test paths resolve. Derived from this file, never hardcoded: an
+# absolute developer path fails everywhere else, CI included.
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # ---------------------------------------------------------------------------
 # Unit tests on the helper — imported directly from conftest
@@ -70,7 +76,7 @@ def _run_pytest(*args: str, env_overrides: dict[str, str] | None = None) -> str:
         capture_output=True,
         text=True,
         env=env,
-        cwd="/home/mmaudet/work/twaky",
+        cwd=_REPO_ROOT,
         check=False,
     )
     return result.stdout + result.stderr
