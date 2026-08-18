@@ -17,6 +17,7 @@ import pickle
 import platform
 import resource
 import sys
+import time
 from typing import Any
 
 log = logging.getLogger("twaky.skills.executor")
@@ -141,26 +142,43 @@ def run_skill(
     proc.start()
     child_conn.close()  # parent doesn't write
 
-    proc.join(timeout=timeout_s)
+    deadline = time.monotonic() + timeout_s
 
+    # Drain the pipe WHILE the child runs, never after joining it. ``pipe.send``
+    # blocks in the child once the OS pipe buffer fills (64 KiB on Linux) and
+    # only unblocks when the parent reads. Joining first therefore deadlocks on
+    # any result larger than the buffer: the child waits for a reader that is
+    # itself waiting for the child, until the timeout fires and reports a
+    # perfectly successful skill as SkillTimeout.
+    #
+    # ``poll`` also returns True on EOF (child died without sending), which the
+    # EOFError branch below turns into the SkillCrashed path.
+    payload: tuple[str, Any] | None = None
+    try:
+        if parent_conn.poll(max(0.0, deadline - time.monotonic())):
+            try:
+                payload = parent_conn.recv()
+            except EOFError:
+                payload = None
+    finally:
+        parent_conn.close()
+
+    # Reap. With a payload in hand the work is already done, so a child that
+    # lingers past the deadline gets killed without discarding its result.
+    proc.join(timeout=max(0.0, deadline - time.monotonic()))
     if proc.is_alive():
         proc.terminate()
         proc.join(3)
         if proc.is_alive():
             proc.kill()
             proc.join(3)
-        parent_conn.close()
-        raise SkillTimeout(f"skill timed out after {timeout_s}s")
-
-    # Read whatever the child managed to send.
-    payload: tuple[str, Any] | None = None
-    try:
-        if parent_conn.poll(0):
-            payload = parent_conn.recv()
-    except EOFError:
-        payload = None
-    finally:
-        parent_conn.close()
+        if payload is None:
+            raise SkillTimeout(f"skill timed out after {timeout_s}s")
+        log.warning(
+            "skill sent a result but did not exit within %ss; killed it and "
+            "kept the result",
+            timeout_s,
+        )
 
     if payload is None:
         raise SkillCrashed(f"skill exited with code {proc.exitcode} and sent no result")
