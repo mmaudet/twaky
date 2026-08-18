@@ -1,7 +1,12 @@
 """Seed a sentinel_run row for E2E testing.
 
 Inserts a completed run for the 'mail' sentinel with a fake event_ref
-and a minimal trace. Prints the run UUID to stdout.
+and a minimal trace. Prints {"id": ..., "event_ref": ...} as JSON.
+
+The caller needs the event_ref, not just the id: runs accumulate in the
+database, so a spec that locates its row by the shared "e2e-seed-" prefix
+matches every previous run too and trips Playwright's strict mode on the
+second execution.
 
 Usage (from inside the twaky-api container):
     python /tmp/seed-sentinel-run.py
@@ -9,13 +14,14 @@ Usage (from inside the twaky-api container):
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 
 from twaky.sentinels import repository
 
 
-def seed_sentinel_run() -> str:
+def seed_sentinel_run() -> dict[str, str]:
     event_ref = f"test.exchange::e2e-seed-{uuid.uuid4().hex[:12]}"
     started_at = datetime.now(tz=UTC)
     run = repository.insert_run(
@@ -38,8 +44,8 @@ def seed_sentinel_run() -> str:
             "duration_ms": 42,
         },
     )
-    return str(run.id)
+    return {"id": str(run.id), "event_ref": event_ref}
 
 
 if __name__ == "__main__":
-    print(seed_sentinel_run())
+    print(json.dumps(seed_sentinel_run()))
