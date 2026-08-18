@@ -82,6 +82,7 @@ def test_delegate_returns_done_when_mission_completes():
     d = Delegation("mail", _dsn())
 
     resolved_event = threading.Event()
+    resolver_error: list[Exception] = []
 
     def _resolver():
         # Poll repeatedly for our unique-intent mission — the outer test's
@@ -108,14 +109,22 @@ def test_delegate_returns_done_when_mission_completes():
             resolved_event.set()
             return
         try:
-            engine.finish(
+            # Walk the legal path a real Atlas run takes. `declared → done` is
+            # rejected by the state machine (see missions/guards.py), so
+            # calling finish() directly leaves the mission untouched and
+            # delegate() times out. Swallowing the error here is what hid that
+            # for as long as this test could only skip: record it instead, so a
+            # failure names its cause.
+            engine.start_planning(target.id)  # declared → planning
+            engine.commit_plan(target.id, [])  # planning → running
+            engine.finish(  # running → done
                 target.id,
                 outcome="done",
                 artifacts=[{"result": "ok"}],
                 reason="test cleanup",
             )
-        except Exception:  # noqa: BLE001, S110
-            pass
+        except Exception as exc:  # noqa: BLE001
+            resolver_error.append(exc)
         resolved_event.set()
 
     resolver_thread = threading.Thread(target=_resolver, daemon=True)
@@ -125,6 +134,7 @@ def test_delegate_returns_done_when_mission_completes():
 
     resolver_thread.join(timeout=3.0)
 
+    assert not resolver_error, f"resolver thread failed: {resolver_error[0]!r}"
     assert result.state == "done"
     assert any(a.get("result") == "ok" for a in result.payload)
 

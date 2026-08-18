@@ -37,18 +37,24 @@ def _reachable() -> bool:
 def _rabbitmq_reachable() -> bool:
     """Skip cleanly outside Docker — ``rabbitmq`` is a compose-internal name.
 
-    Attempts a 1-second DNS lookup on the AMQP host from ``settings.rabbitmq_url``.
-    Without this guard the test fails with a confusing AMQPConnectionError:
-    Temporary failure in name resolution when developers run pytest from
-    the host (RabbitMQ is only reachable from within twake-network).
+    Opens a real 1-second TCP connection to the AMQP host from
+    ``settings.rabbitmq_url``. Without this guard the test fails with a
+    confusing AMQPConnectionError: Temporary failure in name resolution when
+    developers run pytest from the host (RabbitMQ is only reachable from
+    within twake-network).
+
+    A DNS lookup is NOT enough: ``_publish_mail_received`` uses
+    ``aio_pika.connect_robust``, which retries forever by design. A host that
+    resolves but has nothing listening (a stale /etc/hosts entry, a broker
+    that is down, RABBITMQ_URL pointed at a dead port) therefore hangs the
+    whole pytest session instead of skipping.
     """
     try:
         parsed = urlparse(settings.rabbitmq_url)
         host = parsed.hostname or "rabbitmq"
         port = parsed.port or 5672
-        socket.setdefaulttimeout(1)
-        socket.getaddrinfo(host, port)
-        return True
+        with socket.create_connection((host, port), timeout=1):
+            return True
     except Exception:  # noqa: BLE001
         return False
 
