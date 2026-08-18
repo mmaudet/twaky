@@ -21,7 +21,9 @@ async def run(stop_event: asyncio.Event) -> None:
     """Long-running task: LISTEN agent_config_changed, invalidate on payload."""
     log.info("agent config listener starting")
     try:
-        async for ch, payload in listen(["agent_config_changed"], settings.pg_dsn):
+        async for ch, payload in listen(
+            ["agent_config_changed"], settings.pg_dsn, stop_event=stop_event
+        ):
             if stop_event.is_set():
                 return
             if ch == "agent_config_changed":
