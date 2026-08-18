@@ -88,9 +88,15 @@ test('mail-rule-crud: create, verify in list, edit, delete', async ({ signedInPa
     await expect(page.getByText('Rule saved')).toBeVisible({ timeout: 10000 })
     await page.goto('/sentinels/mail')
 
-    // Verify the edited name appears and the old name is gone
+    // Verify the edited name appears and the old name is gone. Absence is
+    // asserted on the table row, not on the page: the success toast repeats the
+    // rule name, so a page-wide match finds two elements and fails on strict
+    // mode — and only once the toast is slow enough to still be up, which is
+    // exactly the difference between a laptop and a CI runner.
     await expect(page.getByText(RULE_NAME_EDITED)).toBeVisible()
-    await expect(page.getByText(RULE_NAME)).not.toBeVisible()
+    await expect(
+        page.getByRole('row').filter({ hasText: RULE_NAME }),
+    ).toHaveCount(0)
 
     // ── Step 5: Delete the rule ────────────────────────────────────────────
     const editedRow = page.getByRole('row').filter({ hasText: RULE_NAME_EDITED })
@@ -99,6 +105,8 @@ test('mail-rule-crud: create, verify in list, edit, delete', async ({ signedInPa
     // Confirm in the AlertDialog
     await page.getByRole('button', { name: /^Delete$/ }).last().click()
 
-    // Rule must disappear
-    await expect(page.getByText(RULE_NAME_EDITED)).not.toBeVisible({ timeout: 5000 })
+    // Rule must disappear from the list (the deletion toast still names it).
+    await expect(
+        page.getByRole('row').filter({ hasText: RULE_NAME_EDITED }),
+    ).toHaveCount(0, { timeout: 5000 })
 })

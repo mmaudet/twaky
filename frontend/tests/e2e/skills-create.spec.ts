@@ -39,6 +39,11 @@ test('create skill via UI, verify it appears in list, cleanup via delete', async
     // AlertDialog confirm button — also labelled "Delete"; use last() since the trigger is hidden
     await page.getByRole('button', { name: /^delete$/i }).last().click()
 
-    // Row must disappear
-    await expect(page.getByText('e2e_echo')).not.toBeVisible()
+    // Row must disappear from the list. Asserted on the row, not the page: the
+    // deletion toast reads "Skill 'e2e_echo' deleted", so a page-wide match
+    // finds two elements and fails on strict mode whenever the toast is still
+    // up — a timing difference between a laptop and a CI runner.
+    await expect(
+        page.getByRole('row').filter({ hasText: 'e2e_echo' }),
+    ).toHaveCount(0, { timeout: 5000 })
 })
